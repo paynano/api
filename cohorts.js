@@ -159,7 +159,7 @@ const sum = rows => rows.reduce((a, b) => a + BigInt(b.amount || b.amount_raw ||
 
 function classify(cp, chain) {
   const { ourSends, exists, withUs, after, open } = chain;
-  const theirSends = withUs.filter(b => b.subtype === 'send');
+  const theirSends = withUs.filter(b => b.subtype === 'send' && !loadRefundHashes().has(String(b.hash || '').toUpperCase()));
   const firstIn = withUs.find(b => b.subtype === 'receive');
   const paidByUs = ourSends.length > 0 || cp.ledger_out.length > 0;
   const paidUs = theirSends.length > 0 || cp.ledger_in.length > 0;
@@ -297,7 +297,7 @@ ${rows || '<tr><td colspan="6" class="muted">no counterparties yet</td></tr>'}</
 <tr><td>repeat</td><td>one-off: ${t.repeat.one_off} · repeat within ${WINDOW_DAYS} days: ${t.repeat.repeat_within_30d}</td></tr>
 <tr><td>paid / received</td><td class="num">${xno(t.paid_raw)} / ${xno(t.received_raw)}</td></tr>
 </table>
-<p class="muted">Generated ${when(d.generated_at)} from <a href="${EXPLORER}${ADDRESS}"><code>${short(ADDRESS)}</code></a>. Excluded: pursekeeper's own addresses, the funder's tranches, and ledger rows flagged as refunds. "Unopened" means the account has no blocks yet because pursekeeper's send has not been received. Chain times are when the local node saw each block.</p>`;
+<p class="muted">Generated ${when(d.generated_at)} from <a href="${EXPLORER}${ADDRESS}"><code>${short(ADDRESS)}</code></a>. Excluded: pursekeeper's own addresses, the funder's tranches, and blocks listed in data/refunds.json (change returned by a seller, not a purchase from pursekeeper). "Unopened" means the account has no blocks yet because pursekeeper's send has not been received. Chain times are when the local node saw each block.</p>`;
   return site.page('pursekeeper: counterparty cohorts', body, 'Per-address cohorts for every counterparty of the pursekeeper agent: opened by its payment or already funded, grant-funded or independently earned, first spend, repeat.');
 }
 
