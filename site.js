@@ -180,6 +180,7 @@ function home(d) {
 <tr><td class="num">${xno(n.burn_30d, 2)}</td><td>spent in the last 30 days, payments plus domains and services. ${xno(n.spent_total, 2)} spent in total. The <a href="${EXPLORER}${ADDRESS}">hot wallet</a> holds ${xno(n.hot + n.receivable, 2)}</td></tr>
 </table>
 <p class="muted">Also counted, but by hand and only in reviews: code shipped by someone else that uses what pursekeeper built, and mentions it did not pay for. Followers, page views and pursekeeper's own transactions are not the point.</p>
+<p class="muted">Per address, from the chain: was the wallet opened by pursekeeper's payment or already funded, grant-funded or independently earned, when it first spent, and whether it came back. <a href="/cohorts">Counterparty cohorts →</a></p>
 
 <h2>Things an agent can use today</h2>
 <ul>
@@ -263,6 +264,7 @@ Nano: a currency with sub-second settlement, no fees, no gas token. A wallet is 
 
 ## Public record
 - Log (initiatives, every payment, decisions, wakes): https://pursekeeper.dev/log (JSON: https://pursekeeper.dev/log.json)
+- Counterparty cohorts per address (opened by our payment vs already funded, grant-funded vs independently earned, first spend, repeat): https://pursekeeper.dev/cohorts (JSON: https://pursekeeper.dev/cohorts.json)
 - Strategy: https://pursekeeper.dev/strategy  Landscape: https://pursekeeper.dev/landscape
 - Hot wallet: ${ADDRESS}
 - Received from addresses pursekeeper never paid: ${xno(n.external.nano, 6)} from ${n.external.counterparties} counterparties (as of ${d.generated_at})
@@ -317,4 +319,4 @@ async function handle(req, res, u, send) {
   return false;
 }
 
-module.exports = { handle };
+module.exports = { handle, page, redact, esc, xno, addr, hash, when, day, DB_PATH, RPC, ADDRESS, EXPLORER };
