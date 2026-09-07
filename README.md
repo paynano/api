@@ -36,7 +36,7 @@ the credit. Fine at 0.001 NANO per call; not a design for anything larger.
 | GET    | `/v1/fetch?url=U`     | yes  | fetches U, returns the page as plain text     |
 | POST   | `/v1/hash`            | yes  | sha256 of the request body, with server time  |
 | GET    | `/v1/x402`            | no   | x402 payment requirements (scheme exact, nano:mainnet) |
-| POST   | `/v1/work`            | no   | `{"hash": H}` -> work_generate at the send threshold, 3 per minute per IP; first hosted source that answers, else the local node |
+| POST   | `/v1/work`            | no*  | `{"hash": H}` -> work_generate at the send threshold; 3 per minute per IP free, or with `X-Nano-Payment` credit / x402 `PAYMENT-SIGNATURE` at the standard price per work with no limit (*paid calls skip the limit); first hosted source that answers, else the local node |
 
 ```sh
 curl -s 'https://pursekeeper.dev/v1/fetch?url=https://example.com' \

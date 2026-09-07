@@ -159,13 +159,23 @@ async function chargeX402(req, res, headerValue) {
 // Rate-limited proxy to the node's work_generate, for clients without a work server.
 const workHits = new Map();   // ip -> [timestamps]
 let workInFlight = 0;
+// Free: 3 per minute per IP. Paid (X-Nano-Payment credit hash or an x402 PAYMENT-SIGNATURE
+// at the standard price): no per-IP limit. A paying x402 block gets its own work computed
+// here too, so an agent with Nano but no PoW can buy its first work without doing any.
 async function workGenerate(req, res) {
-  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-  const now = Date.now();
-  const hits = (workHits.get(ip) || []).filter(t => now - t < 60_000);
-  if (hits.length >= 3) return send(res, 429, { error: 'limit is 3 work_generate calls per minute per IP' });
-  hits.push(now); workHits.set(ip, hits);
-  if (workHits.size > 10_000) workHits.clear();
+  const paid = !!(req.headers['x-nano-payment'] || x402.paymentHeader(req.headers));
+  if (paid) {
+    if (!await charge(req, res)) return;
+    workStats.paid = (workStats.paid || 0) + 1;
+  } else {
+    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const now = Date.now();
+    const hits = (workHits.get(ip) || []).filter(t => now - t < 60_000);
+    // Over the free limit the answer is a normal 402 with PAYMENT-REQUIRED, so an x402 client just pays.
+    if (hits.length >= 3) return paymentRequired(res, 'free limit is 3 work_generate calls per minute per IP; pay ' + nano(PRICE_RAW) + ' NANO per work (X-Nano-Payment credit or x402 PAYMENT-SIGNATURE) to continue without limit', req);
+    hits.push(now); workHits.set(ip, hits);
+    if (workHits.size > 10_000) workHits.clear();
+  }
   let body;
   try { body = JSON.parse((await readBody(req, 10_000)).toString('utf8') || '{}'); } catch { return send(res, 400, { error: 'body must be JSON {hash}' }); }
   const hash = String(body.hash || '').toUpperCase();
@@ -174,7 +184,7 @@ async function workGenerate(req, res) {
   workInFlight++;
   try {
     const r = await workFor(hash);
-    return send(res, 200, { hash, work: r.work, threshold: x402.WORK_THRESHOLD, source: r.source, ms: r.ms });
+    return send(res, 200, { hash, work: r.work, threshold: x402.WORK_THRESHOLD, source: r.source, ms: r.ms, paid });
   } catch (e) { return send(res, 502, { error: 'work_generate: ' + e.message }); }
   finally { workInFlight--; }
 }
@@ -268,7 +278,9 @@ Endpoints
   GET  /v1/fetch?url=U        fetches U and returns the page as plain text (paid)
   POST /v1/hash               sha256 of the request body, with server time (paid)
   GET  /v1/x402               x402 payment requirements for the paid endpoints (free)
-  POST /v1/work  {"hash":H}   work_generate for your frontier, 3 per minute per IP (free)
+  POST /v1/work  {"hash":H}   work_generate at the send threshold for any hash: 3 per minute
+                              per IP free; with X-Nano-Payment credit or an x402 payment
+                              header, ${nano(PRICE_RAW)} NANO per work and no limit
 
 Example
   curl -s 'https://pursekeeper.dev/v1/fetch?url=https://example.com' \\
@@ -311,7 +323,7 @@ const server = http.createServer(async (req, res) => {
       request_header: 'PAYMENT-SIGNATURE (X-PAYMENT also accepted): base64 JSON {x402Version:2, accepted, payload:{block}}',
       response_header: 'PAYMENT-RESPONSE: base64 JSON {success, transaction, network, payer}',
       block_rules: 'state block from your current confirmed frontier; balance = current balance - amount exactly; link = payTo; work optional (extra.work = "optional"): omit it or send "0" and this seller computes it before broadcasting; if you send work it must be valid at ' + x402.WORK_THRESHOLD + ' against previous',
-      work: 'POST /v1/work {"hash": "<frontier>"}, 3 per minute per IP, for sends to anyone else', example: '/examples/client-x402.js', spec: 'https://github.com/x402nano/schemes',
+      work: 'POST /v1/work {"hash": "<frontier>"}: 3 per minute per IP free, or pay ' + nano(PRICE_RAW) + ' NANO per work (same headers) with no limit; for sends to anyone else', example: '/examples/client-x402.js', spec: 'https://github.com/x402nano/schemes',
       work_sources: [...WORK_URLS.map(u => new URL(u).host), 'node'] });
     if (u.pathname === '/v1/work' && req.method === 'POST') return workGenerate(req, res);
     if (u.pathname === '/v1/credit') {

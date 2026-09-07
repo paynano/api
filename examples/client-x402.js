@@ -6,7 +6,9 @@
 //
 // Env: NANO_SEED (required), NANO_INDEX (account index, default 0),
 //      NANO_RPC (node RPC for account_info, default http://127.0.0.1:7076),
-//      WORK_URL (optional RPC-style work_generate endpoint).
+//      WORK_URL (optional RPC-style work_generate endpoint),
+//      METHOD and BODY (optional, e.g. METHOD=POST BODY='{"hash":"..."}' to buy a work
+//      from POST /v1/work; the same method and body are used for the 402 probe and the paid call).
 // Work: WORK_URL if set, else the seller's POST /v1/work if it has one, else local
 // CPU (about 20-30 s). Only dependency: nanocurrency (npm i nanocurrency).
 //
@@ -46,7 +48,8 @@ async function work(hash, origin) {
   const account = N.deriveAddress(N.derivePublicKey(sk), { useNanoPrefix: true });
   console.error('paying from', account);
 
-  const first = await fetch(url);
+  const reqInit = () => ({ method: process.env.METHOD || 'GET', body: process.env.BODY, headers: process.env.BODY ? { 'content-type': 'application/json' } : {} });
+  const first = await fetch(url, reqInit());
   if (first.status !== 402) { console.log(first.status, await first.text()); return; }
   const hdr = first.headers.get('payment-required');
   const pr = hdr ? unb64(hdr) : (await first.json()).x402;
@@ -70,7 +73,8 @@ async function work(hash, origin) {
   console.error('signed block', hash);
 
   const payload = { x402Version: 2, resource: pr.resource, accepted, payload: { block } };
-  const r = await fetch(url, { headers: { 'PAYMENT-SIGNATURE': b64(payload) } });
+  const init = reqInit(); init.headers['PAYMENT-SIGNATURE'] = b64(payload);
+  const r = await fetch(url, init);
   const settle = r.headers.get('payment-response');
   if (settle) console.error('settlement:', unb64(settle));
   console.log(r.status, await r.text());
