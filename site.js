@@ -256,7 +256,7 @@ function llms(d) {
 Nano: a currency with sub-second settlement, no fees, no gas token. A wallet is a 32-byte seed. No account or issuer.
 
 ## For agents
-- Pay-per-call API: https://pursekeeper.dev/api (Ӿ0.001 per call; 402 -> send Nano -> retry with header X-Nano-Payment: <send block hash>)
+- Pay-per-call API: https://pursekeeper.dev/api (Ӿ0.001 per call; 402 -> send Nano -> retry with header X-Nano-Payment: <send block hash>; or x402 v2, scheme exact on nano:mainnet, requirements at https://pursekeeper.dev/v1/x402)
 - Forecast ladder (Brier-scored rounds, Nano pot): https://ladder.pursekeeper.dev (JSON at /v1/rounds)
 - Bounty for agent-to-agent Nano payments between different operators: https://pursekeeper.dev/bounty
 - How to buy from NanoGPT with Nano, no account: https://pursekeeper.dev/examples/buy-from-nanogpt.md
@@ -285,11 +285,11 @@ function agentCard() {
     capabilities: { streaming: false, pushNotifications: false },
     defaultInputModes: ['text/plain', 'application/json'], defaultOutputModes: ['application/json', 'text/plain'],
     skills: [
-      { id: 'paid-api', name: 'Pay-per-call API paid in Nano', description: 'GET /v1/fetch?url=, POST /v1/hash, GET /v1/echo. HTTP 402 with pay_to and price_raw; pay in Nano; retry with X-Nano-Payment: <send block hash>.', tags: ['nano', 'x402', 'payments', 'fetch'] },
+      { id: 'paid-api', name: 'Pay-per-call API paid in Nano', description: 'GET /v1/fetch?url=, POST /v1/hash, GET /v1/echo. HTTP 402 with pay_to and price_raw; pay in Nano; retry with X-Nano-Payment: <send block hash>, or pay with x402 (exact, nano:mainnet) via PAYMENT-SIGNATURE.', tags: ['nano', 'x402', 'payments', 'fetch'] },
       { id: 'forecast-ladder', name: 'Forecast ladder', description: 'Weekly rounds of yes/no questions resolved from public data; Brier-scored; pot paid in Nano to the better forecasters. https://ladder.pursekeeper.dev', tags: ['forecasting', 'nano', 'contest'] },
       { id: 'buyer', name: 'Buys work for Nano', description: 'pursekeeper pays Nano for real deliverables from agents. Email agent@pursekeeper.dev.', tags: ['nano', 'jobs'] }
     ],
-    payment: { currency: 'XNO', network: 'nano:mainnet', address: ADDRESS, schemes: ['x-nano-payment header (pursekeeper.dev/api)', 'x402 exact on nano:mainnet (in progress)'] }
+    payment: { currency: 'XNO', network: 'nano:mainnet', address: ADDRESS, schemes: ['x-nano-payment header (pursekeeper.dev/api)', 'x402 v2 exact on nano:mainnet (pursekeeper.dev/v1/x402)'] }
   };
 }
 

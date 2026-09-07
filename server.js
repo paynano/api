@@ -1,6 +1,9 @@
 // Pay-per-call HTTP API paid in Nano. No accounts, no keys.
 // Flow: call an endpoint -> 402 with price and address -> send Nano -> retry with
 // header X-Nano-Payment: <send block hash>. Overpayment stays as credit on that hash.
+// Also speaks x402 v2 (scheme "exact", network "nano:mainnet"): the 402 carries a
+// PAYMENT-REQUIRED header, the client retries with PAYMENT-SIGNATURE carrying a signed
+// send block, and this process verifies and broadcasts it itself (see x402.js).
 'use strict';
 const http = require('http');
 const fs = require('fs');
@@ -10,6 +13,9 @@ const dns = require('dns').promises;
 const net = require('net');
 const site = require('./site');
 const cohorts = require('./cohorts');
+const x402 = require('./x402');
+const { Helper } = require('@x402nano/helper');
+const { ExactNanoScheme: X402Reference } = require('@x402nano/exact/facilitator');
 
 const PORT = Number(process.env.PORT || 3000);
 const RPC = process.env.NANO_RPC || 'http://127.0.0.1:7076';
@@ -18,12 +24,18 @@ const PRICE_RAW = 10n ** 27n;                // 0.001 NANO per call
 const MAX_CREDIT_RAW = 10n ** 30n;           // ignore sends above 1 NANO (tranches are not credit)
 const NOT_BEFORE = Number(process.env.NOT_BEFORE || 1757210000); // unix time service went live
 const DATA = path.join(__dirname, 'data', 'credits.json');
+const X402_LOG = path.join(__dirname, 'data', 'x402.json');   // settled x402 blocks: hash, payer, amount, resource, at
+const X402_REQ = x402.requirements({ payTo: ADDRESS, amountRaw: PRICE_RAW, maxTimeoutSeconds: 60 });
+const x402Reference = new X402Reference(new Helper({ NANO_RPC_URL: RPC })); // reference verify() runs in addition to ours
+const settling = new Set();                                    // block hashes with a "process" call in flight
 const RAW_PER_NANO = 10n ** 30n;
 
 let credits = {};
 try { credits = JSON.parse(fs.readFileSync(DATA, 'utf8')); } catch {}
 const save = () => fs.writeFileSync(DATA, JSON.stringify(credits));
-const stats = { calls_paid: 0, calls_402: 0, started: new Date().toISOString() };
+const stats = { calls_paid: 0, calls_x402: 0, calls_402: 0, started: new Date().toISOString() };
+let x402Log = [];
+try { x402Log = JSON.parse(fs.readFileSync(X402_LOG, 'utf8')); } catch {}
 
 async function rpc(body) {
   const r = await fetch(RPC, { method: 'POST', body: JSON.stringify(body) });
@@ -53,12 +65,25 @@ function nano(raw) { return (Number(raw) / 1e30).toString(); }
 function send(res, code, body, type = 'application/json') {
   const data = typeof body === 'string' ? body : JSON.stringify(body, null, 1);
   res.writeHead(code, { 'content-type': type + '; charset=utf-8', 'access-control-allow-origin': '*',
-    'access-control-allow-headers': 'X-Nano-Payment, Content-Type' });
+    'access-control-allow-headers': 'X-Nano-Payment, PAYMENT-SIGNATURE, X-PAYMENT, Content-Type',
+    'access-control-expose-headers': 'PAYMENT-REQUIRED, PAYMENT-RESPONSE, X-Nano-Credit-Remaining-Raw, X-Nano-Payment-Hash' });
   res.end(data);
 }
 
-function paymentRequired(res, hint) {
+const DESCRIPTIONS = { '/v1/echo': 'returns what you sent', '/v1/fetch': 'fetches a URL and returns the page as plain text', '/v1/hash': 'sha256 of the request body, with server time' };
+function hostOf(req) { return String(req.headers['x-forwarded-host'] || req.headers.host || 'pursekeeper.dev').split(',')[0].trim(); }
+
+// x402 v2 PaymentRequired for this request: header value plus the same object for the JSON body.
+function x402Required(req, hint) {
+  const u = new URL(req.url, 'http://x');
+  return x402.paymentRequired({ requirements: X402_REQ, url: 'https://' + hostOf(req) + req.url,
+    description: DESCRIPTIONS[u.pathname] || 'pursekeeper.dev paid call', error: hint || 'payment required' });
+}
+
+function paymentRequired(res, hint, req) {
   stats.calls_402++;
+  const pr = req ? x402Required(req, hint) : null;
+  if (pr) res.setHeader(x402.REQUIRED_HEADER, pr.header);
   send(res, 402, {
     error: hint || 'payment required',
     pay_to: ADDRESS,
@@ -66,16 +91,74 @@ function paymentRequired(res, hint) {
     price_raw: PRICE_RAW.toString(),
     how: 'Send at least price_raw to pay_to, then retry with header X-Nano-Payment: <send block hash>. ' +
          'Anything above the price stays as credit on that hash for later calls (max 1 NANO per hash).',
+    how_x402: 'Or pay per call with x402: decode the PAYMENT-REQUIRED header (base64 JSON, same as the x402 field below), ' +
+              'sign a send block for exactly amount raw to payTo from your current frontier, and retry with header ' +
+              'PAYMENT-SIGNATURE: base64({x402Version:2, accepted, payload:{block}}). See /v1/x402 and /examples/client-x402.js.',
+    x402: pr ? pr.body : undefined,
     docs: '/'
   });
 }
 
+// x402 path: verify the signed send block locally, broadcast it, then serve. The settled
+// hash is written to credits.json with zero credit so it can never be presented again
+// through the X-Nano-Payment path (a settled x402 block is a confirmed send to us).
+async function chargeX402(req, res, headerValue) {
+  const d = x402.decodePayment(headerValue);
+  if (d.error) return paymentRequired(res, 'x402: ' + d.error, req), false;
+  const v = await x402.verify(d.payload, X402_REQ, {
+    accountInfo: account => rpc({ action: 'account_info', account, representative: 'true' }),
+    seen: async h => (h in credits) || settling.has(h),
+    reference: x402Reference
+  });
+  if (!v.ok) return paymentRequired(res, 'x402: ' + v.reason, req), false;
+  settling.add(v.hash);
+  let s;
+  try { s = await x402.settle(v.block, v.payer, { process: block => rpc({ action: 'process', json_block: 'true', subtype: 'send', block }) }); }
+  finally { settling.delete(v.hash); }
+  if (!s.success) return paymentRequired(res, 'x402: ' + s.errorReason, req), false;
+  credits[s.transaction] = '0';
+  if (v.hash !== s.transaction) credits[v.hash] = '0';
+  save();
+  x402Log.push({ hash: s.transaction, payer: v.payer, amount_raw: PRICE_RAW.toString(), resource: req.url, at: new Date().toISOString() });
+  try { fs.writeFileSync(X402_LOG, JSON.stringify(x402Log)); } catch {}
+  stats.calls_paid++; stats.calls_x402++;
+  res.setHeader(x402.RESPONSE_HEADER, x402.settleHeader(s));
+  res.setHeader('x-nano-payment-hash', s.transaction);
+  return true;
+}
+
+// Rate-limited proxy to the node's work_generate, for clients without a work server.
+const workHits = new Map();   // ip -> [timestamps]
+let workInFlight = 0;
+async function workGenerate(req, res) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const now = Date.now();
+  const hits = (workHits.get(ip) || []).filter(t => now - t < 60_000);
+  if (hits.length >= 3) return send(res, 429, { error: 'limit is 3 work_generate calls per minute per IP' });
+  hits.push(now); workHits.set(ip, hits);
+  if (workHits.size > 10_000) workHits.clear();
+  let body;
+  try { body = JSON.parse((await readBody(req, 10_000)).toString('utf8') || '{}'); } catch { return send(res, 400, { error: 'body must be JSON {hash}' }); }
+  const hash = String(body.hash || '').toUpperCase();
+  if (!/^[0-9A-F]{64}$/.test(hash)) return send(res, 400, { error: 'hash must be 64 hex characters (your account frontier)' });
+  if (workInFlight >= 2) return send(res, 503, { error: 'work server busy; retry in a few seconds' });
+  workInFlight++;
+  try {
+    const r = await rpc({ action: 'work_generate', hash, difficulty: x402.WORK_THRESHOLD });
+    if (r.error) return send(res, 502, { error: 'work_generate: ' + r.error });
+    return send(res, 200, { hash, work: r.work, difficulty: r.difficulty, multiplier: r.multiplier, threshold: x402.WORK_THRESHOLD });
+  } finally { workInFlight--; }
+}
+
 async function charge(req, res) {
   const hash = req.headers['x-nano-payment'];
-  if (!hash) return paymentRequired(res), false;
+  if (!hash) {
+    const ph = x402.paymentHeader(req.headers);
+    return ph ? chargeX402(req, res, ph) : (paymentRequired(res, undefined, req), false);
+  }
   const c = await creditFor(hash);
-  if (c.error) return paymentRequired(res, c.error), false;
-  if (c.remaining < PRICE_RAW) return paymentRequired(res, 'credit on this hash is used up'), false;
+  if (c.error) return paymentRequired(res, c.error, req), false;
+  if (c.remaining < PRICE_RAW) return paymentRequired(res, 'credit on this hash is used up', req), false;
   const left = c.remaining - PRICE_RAW;
   credits[hash.toUpperCase()] = left.toString();
   save();
@@ -135,6 +218,18 @@ Flow
      Overpayment stays as credit on that hash (max 1 NANO per hash), so one
      send can cover many calls. Whoever presents the hash first spends the credit.
 
+x402
+  The same endpoints also take standard x402 (v2) payments with the Nano scheme
+  from @x402nano/exact: scheme "exact", network "nano:mainnet", asset "XNO",
+  amount ${PRICE_RAW} raw. The 402 carries a PAYMENT-REQUIRED header (base64
+  JSON; the same object is in the body under "x402"). Sign a send block from your
+  current frontier for exactly that amount to payTo, with work at the send
+  threshold, and retry with PAYMENT-SIGNATURE: base64 JSON {x402Version: 2,
+  accepted, payload: {block}}. This server verifies the block against its own node
+  and broadcasts it; the reply carries PAYMENT-RESPONSE with the block hash. No
+  external facilitator, no account. The block pays for one call and cannot be
+  reused as X-Nano-Payment credit. Requirements: GET /v1/x402. Work: POST /v1/work.
+
 Endpoints
   GET  /api                   this text (also / for non-browser clients)
   GET  /v1/price              price and address (free)
@@ -143,12 +238,14 @@ Endpoints
   GET  /v1/echo?msg=hi        returns what you sent (paid; for testing your client)
   GET  /v1/fetch?url=U        fetches U and returns the page as plain text (paid)
   POST /v1/hash               sha256 of the request body, with server time (paid)
+  GET  /v1/x402               x402 payment requirements for the paid endpoints (free)
+  POST /v1/work  {"hash":H}   work_generate for your frontier, 3 per minute per IP (free)
 
 Example
   curl -s 'https://pursekeeper.dev/v1/fetch?url=https://example.com' \\
        -H 'X-Nano-Payment: YOUR_SEND_BLOCK_HASH'
 
-Client examples: /examples/client.py  /examples/client.js
+Client examples: /examples/client.py  /examples/client.js  /examples/client-x402.js
 Source: https://github.com/pursekeeper/api   Address: ${ADDRESS}
 `;
 
@@ -177,7 +274,15 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, fs.readFileSync(f, 'utf8'), 'text/plain');
     }
     if (u.pathname === '/v1/price') return send(res, 200, { pay_to: ADDRESS, price_raw: PRICE_RAW.toString(), price_nano: nano(PRICE_RAW) });
-    if (u.pathname === '/v1/stats') return send(res, 200, { ...stats, credited_hashes: Object.keys(credits).length });
+    if (u.pathname === '/v1/stats') return send(res, 200, { ...stats, credited_hashes: Object.keys(credits).length, x402_settled: x402Log.length });
+    if (u.pathname === '/v1/x402') return send(res, 200, {
+      x402Version: x402.X402_VERSION, accepts: [X402_REQ],
+      resource: { url: 'https://' + hostOf(req) + '/v1/{echo,fetch,hash}', description: 'pursekeeper.dev pay-per-call API', mimeType: 'application/json' },
+      request_header: 'PAYMENT-SIGNATURE (X-PAYMENT also accepted): base64 JSON {x402Version:2, accepted, payload:{block}}',
+      response_header: 'PAYMENT-RESPONSE: base64 JSON {success, transaction, network, payer}',
+      block_rules: 'state block from your current confirmed frontier; balance = current balance - amount exactly; link = payTo; work valid at ' + x402.WORK_THRESHOLD + ' against previous',
+      work: 'POST /v1/work {"hash": "<frontier>"}, 3 per minute per IP', example: '/examples/client-x402.js', spec: 'https://github.com/x402nano/schemes' });
+    if (u.pathname === '/v1/work' && req.method === 'POST') return workGenerate(req, res);
     if (u.pathname === '/v1/credit') {
       const c = await creditFor(u.searchParams.get('hash') || '');
       return send(res, c.error ? 400 : 200, c.error ? { error: c.error } : { remaining_raw: c.remaining.toString(), remaining_nano: nano(c.remaining) });

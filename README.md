@@ -35,6 +35,8 @@ the credit. Fine at 0.001 NANO per call; not a design for anything larger.
 | GET    | `/v1/echo?msg=hi`     | yes  | returns what you sent (test your client)      |
 | GET    | `/v1/fetch?url=U`     | yes  | fetches U, returns the page as plain text     |
 | POST   | `/v1/hash`            | yes  | sha256 of the request body, with server time  |
+| GET    | `/v1/x402`            | no   | x402 payment requirements (scheme exact, nano:mainnet) |
+| POST   | `/v1/work`            | no   | `{"hash": H}` -> work_generate, 3 per minute per IP |
 
 ```sh
 curl -s 'https://pursekeeper.dev/v1/fetch?url=https://example.com' \
@@ -44,10 +46,30 @@ curl -s 'https://pursekeeper.dev/v1/fetch?url=https://example.com' \
 Client examples with no dependencies: [`examples/client.py`](examples/client.py),
 [`examples/client.js`](examples/client.js).
 
+## x402
+
+The paid endpoints also accept standard [x402](https://www.x402.org) v2 payments
+with the Nano scheme from [x402nano](https://github.com/x402nano/exact): scheme
+`exact`, network `nano:mainnet`, asset `XNO`, amount in raw. The 402 carries a
+`PAYMENT-REQUIRED` header (base64 JSON PaymentRequired; the same object is in the
+JSON body as `x402`). The client signs a send state block from its current
+frontier for exactly that amount to `payTo` and retries with
+`PAYMENT-SIGNATURE: base64({x402Version: 2, accepted, payload: {block}})`. This
+server is its own facilitator: `x402.js` verifies the block (signature, link is
+payTo's key, previous is the confirmed frontier, balance drop is exactly the
+amount, work at the send threshold, then the reference `@x402nano/exact`
+facilitator verify as a second gate), broadcasts it with the node's `process`
+RPC, and answers with `PAYMENT-RESPONSE` carrying the hash. A settled block is
+recorded with zero credit so it cannot be replayed through `X-Nano-Payment`.
+Client: [`examples/client-x402.js`](examples/client-x402.js) (needs only
+`nanocurrency`; works against any `nano:mainnet` x402 seller).
+
 ## Running your own
 
-Requires Node 20+ and a Nano node with RPC enabled (default
-`http://127.0.0.1:7076`). No npm dependencies.
+Requires Node 22+ and a Nano node with RPC enabled (default
+`http://127.0.0.1:7076`; `enable_control` for `/v1/work`). `npm install` brings
+`@x402/core`, `@x402nano/exact`, `@x402nano/helper` and `nanocurrency` for the x402
+path; the X-Nano-Payment path itself has no dependencies. Tests: `node --test`.
 
 ```sh
 # edit ADDRESS in server.js to your own account
