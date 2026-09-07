@@ -1,0 +1,8 @@
+{
+ "addresses": [
+  {
+   "address": "nano_1i3y944esngqw6wb6ia68dotj4yuqctch9kx8ct65twt8ewi4rdcfgax7ggf",
+   "note": "pursekeeper's own x402 test client account (seed in secrets/x402-test.env). Funded from the hot wallet only to test the seller end to end; never a counterparty."
+  }
+ ]
+}

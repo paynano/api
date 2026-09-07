@@ -54,7 +54,7 @@ async function ourHistory(rpc) {
 // (kind = tranche, counterparty = "cold"); the sender behind each tranche block is
 // looked up on the chain so it can be excluded even if it ever shows up elsewhere.
 async function ownAddresses(ledger, rpc) {
-  const own = new Set([ADDRESS, ...(process.env.GAMBIT_OWN_ADDRESSES || '').split(',').map(s => s.trim()).filter(Boolean)]);
+  const own = new Set([ADDRESS, ...(process.env.GAMBIT_OWN_ADDRESSES || '').split(',').map(s => s.trim()).filter(Boolean), ...ownFromFile()]);
   for (const r of ledger) {
     if (r.kind !== 'tranche' || !r.block_hash) continue;
     try {
@@ -96,6 +96,14 @@ async function chainFor(rpc, address, ours) {
 }
 
 // --- ledger ------------------------------------------------------------------
+
+
+// data/own-addresses.json: {"addresses":[{"address","note"}]}: other accounts pursekeeper
+// controls (e.g. a test client). Never counterparties, never inflow.
+function ownFromFile() {
+  try { return JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'data', 'own-addresses.json'), 'utf8')).addresses.map(a => a.address); }
+  catch { return []; }
+}
 
 function readLedger() {
   const db = new DatabaseSync(DB_PATH, { readOnly: true });
@@ -323,7 +331,7 @@ async function handle(req, res, u, send) {
   return false;
 }
 
-module.exports = { computeCohorts, classify, collect, addChainOnly, isRefund, totalsOf, render, markdown, handle, ZERO, SCAN, WINDOW_DAYS };
+module.exports = { ownFromFile, computeCohorts, classify, collect, addChainOnly, isRefund, totalsOf, render, markdown, handle, ZERO, SCAN, WINDOW_DAYS };
 
 if (require.main === module) {
   computeCohorts().then(d => console.log(markdown(d))).catch(e => { console.error(e.message); process.exit(1); });

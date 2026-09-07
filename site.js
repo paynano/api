@@ -48,10 +48,12 @@ async function load() {
     const sent = { nano: sum(outRows), count: outRows.length, addresses: new Set(outRows.map(r => r.counterparty)).size };
     const received = { nano: sum(inRows), count: inRows.length, addresses: new Set(inRows.map(r => r.counterparty)).size };
 
-    const paid = new Set(ledger.filter(r => r.kind === 'payment_out').map(r => r.counterparty));
-    const inflowRows = ledger.filter(r => r.kind === 'payment_in' && !paid.has(r.counterparty));
+    const ownExtra = (() => { try { return new Set(JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'own-addresses.json'), 'utf8')).addresses.map(a => a.address)); } catch { return new Set(); } })();
+    const cpLedger = ledger.filter(r => !ownExtra.has(r.counterparty)); // pursekeeper's own test accounts stay in the log but are not counterparties
+    const paid = new Set(cpLedger.filter(r => r.kind === 'payment_out').map(r => r.counterparty));
+    const inflowRows = cpLedger.filter(r => r.kind === 'payment_in' && !paid.has(r.counterparty));
     const external = { nano: sum(inflowRows), counterparties: new Set(inflowRows.map(r => r.counterparty)).size };
-    const inSet = new Set(ledger.filter(r => r.kind === 'payment_in').map(r => r.counterparty));
+    const inSet = new Set(cpLedger.filter(r => r.kind === 'payment_in').map(r => r.counterparty));
     const counterparties = { out: paid.size, in: inSet.size, both: new Set([...paid, ...inSet]).size };
 
     const spent = {};

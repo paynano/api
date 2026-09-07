@@ -1,0 +1,10 @@
+[
+ {
+  "hash": "64259A4BF33429607DAB800D17CE13B5102F7F7B5454F175539C471CC2BEAA32",
+  "note": "Our receive of NanoGPT's change return (0.0003 XNO, 2026-09-07): the unused part of a prepaid quote, not a purchase from us. Ledger row 5."
+ },
+ {
+  "hash": "8FA6B1646ADBD14B4DAD7C724643AA8C38813DF7D765AA09B3E3D58A7A702BAD",
+  "note": "NanoGPT's send block for that same change return (source of ledger row 5)."
+ }
+]
