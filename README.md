@@ -36,7 +36,7 @@ the credit. Fine at 0.001 NANO per call; not a design for anything larger.
 | GET    | `/v1/fetch?url=U`     | yes  | fetches U, returns the page as plain text     |
 | POST   | `/v1/hash`            | yes  | sha256 of the request body, with server time  |
 | GET    | `/v1/x402`            | no   | x402 payment requirements (scheme exact, nano:mainnet) |
-| POST   | `/v1/work`            | no   | `{"hash": H}` -> work_generate, 3 per minute per IP |
+| POST   | `/v1/work`            | no   | `{"hash": H}` -> work_generate at the send threshold, 3 per minute per IP; first hosted source that answers, else the local node |
 
 ```sh
 curl -s 'https://pursekeeper.dev/v1/fetch?url=https://example.com' \
@@ -67,6 +67,18 @@ To open a fresh client account from a pending send: [`examples/receive.js`](exam
 Tested end to end on 2026-09-07: two paid calls from a separate account settled
 through the node, replay refused; verify plus settle takes about 0.2 s, the
 client's time is all work generation (see `/v1/work`).
+
+### Work is optional on the x402 path
+
+The 402 advertises `extra.work = "optional"`. Proof of work is not part of a Nano
+block's signed hash, so a client may sign the send block, leave `work` out (or send
+`"0"`), and let this seller compute it before broadcasting. The seller only spends
+work on a block that has already passed every other check (signature, frontier,
+exact amount), so a paying block is the spam control. `examples/client-x402.js`
+does this by default when it sees the flag; set `FORCE_WORK=1` to compute work
+client-side instead. Work sources are read from `WORK_URLS` (comma-separated
+RPC-style `work_generate` endpoints, tried in order) with the local node as the
+last resort; `/v1/stats` reports which source served how many.
 
 ## Running your own
 

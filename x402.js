@@ -37,9 +37,14 @@ const REQUIRED_HEADER = 'PAYMENT-REQUIRED';
 const RESPONSE_HEADER = 'PAYMENT-RESPONSE';
 const REQUEST_HEADERS = ['payment-signature', 'x-payment'];
 
-function requirements({ payTo, amountRaw, maxTimeoutSeconds = 60 }) {
-  return { scheme: SCHEME, network: NETWORK, amount: String(amountRaw), asset: ASSET, payTo, maxTimeoutSeconds, extra: {} };
+// extra.work = 'optional' tells clients they may omit block.work (or send "0"): the seller
+// computes it before broadcasting. Work is not part of the signed hash, so this is safe.
+function requirements({ payTo, amountRaw, maxTimeoutSeconds = 60, workOptional = false }) {
+  return { scheme: SCHEME, network: NETWORK, amount: String(amountRaw), asset: ASSET, payTo, maxTimeoutSeconds,
+    extra: workOptional ? { work: 'optional' } : {} };
 }
+
+const NO_WORK = w => w === undefined || w === null || /^0*$/.test(String(w));
 
 // PaymentRequired object (x402 v2) and its header value.
 function paymentRequired({ requirements: req, url, description, mimeType = 'application/json', error }) {
@@ -66,7 +71,9 @@ const nanoPrefix = a => String(a).replace(/^xrb_/, 'nano_');
 //   workThreshold        -> hex threshold (default send threshold)
 //   reference            -> optional @x402nano/exact facilitator scheme; its verify() runs too
 //   seen(hash)           -> optional; true if this hash was already settled or credited
-// Returns { ok, reason?, payer?, hash?, block? }. Never throws.
+//   workGenerate(hash)   -> optional; returns work for the payer's frontier when the block
+//                           carries none (or invalid work). Runs last, after every cheap check.
+// Returns { ok, reason?, payer?, hash?, block?, workBy? ('client'|'seller') }. Never throws.
 async function verify(payload, required, deps) {
   const fail = (reason, payer = '') => ({ ok: false, reason, payer });
   try {
@@ -85,6 +92,7 @@ async function verify(payload, required, deps) {
 
     // block shape
     const raw = p.payload && p.payload.block;
+    if (raw && typeof raw === 'object' && NO_WORK(raw.work) && deps.workGenerate) raw.work = '0';
     if (!NANO_SEND_BLOCK.safeParse(raw).success) return fail('payload.block is not a Nano state block');
     const block = {
       type: 'state', account: nanoPrefix(raw.account), previous: up(raw.previous), representative: nanoPrefix(raw.representative),
@@ -93,7 +101,9 @@ async function verify(payload, required, deps) {
     const payer = block.account;
     if (!N.checkAddress(block.account)) return fail('block.account is not a valid nano_ address', payer);
     if (!N.checkAddress(block.representative)) return fail('block.representative is not a valid nano_ address', payer); // (f)
-    if (!/^[0-9A-F]{16}$/i.test(block.work)) return fail('block.work must be 16 hex characters', payer);
+    const needWork = NO_WORK(block.work);
+    if (needWork && !deps.workGenerate) return fail('block.work is required here', payer);
+    if (!needWork && !/^[0-9A-F]{16}$/i.test(block.work)) return fail('block.work must be 16 hex characters', payer);
 
     // (c) link must be the public key of payTo; link_as_account, if given, must agree
     const payToKey = up(N.derivePublicKey(nanoPrefix(required.payTo)));
@@ -126,18 +136,27 @@ async function verify(payload, required, deps) {
     if (diff < want) return fail(diff <= 0n ? 'block does not send anything' : 'block sends ' + diff + ' raw; ' + want + ' raw required', payer);
     if (diff > want) return fail('block sends ' + diff + ' raw; exactly ' + want + ' raw required (overpayment is not credited on this path)', payer);
 
-    // (g) work at the send threshold, against previous (== frontier)
-    try {
-      if (!N.validateWork({ blockHash: block.previous, work: block.work, threshold: deps.workThreshold || WORK_THRESHOLD }))
-        return fail('work is below the send threshold ' + (deps.workThreshold || WORK_THRESHOLD), payer);
-    } catch (e) { return fail('bad work: ' + e.message, payer); }
+    // (g) work at the send threshold, against previous (== frontier). If the client sent none
+    // (or bad work) and we have a work source, compute it now: every cheaper check has passed,
+    // so only a block that is about to pay us costs us work.
+    const threshold = deps.workThreshold || WORK_THRESHOLD;
+    let workBy = 'client';
+    const validWork = w => { try { return N.validateWork({ blockHash: block.previous, work: w, threshold }); } catch { return false; } };
+    if (needWork || !validWork(block.work)) {
+      if (!deps.workGenerate) return fail('work is below the send threshold ' + threshold, payer);
+      let w;
+      try { w = await deps.workGenerate(block.previous); } catch (e) { return fail('could not generate work: ' + e.message, payer); }
+      if (!w || !validWork(w)) return fail('could not generate work' + (w ? ' (source returned work below threshold)' : ''), payer);
+      block.work = String(w).toLowerCase();
+      workBy = 'seller';
+    }
 
     // Reference implementation as an extra gate (schema, link_as_account, balance, work, signature).
     if (deps.reference) {
       const r = await deps.reference.verify({ ...p, payload: { block } }, required);
       if (!r || !r.isValid) return fail('reference verify: ' + (r && r.invalidReason || 'invalid'), payer);
     }
-    return { ok: true, payer, hash, block };
+    return { ok: true, payer, hash, block, workBy };
   } catch (e) {
     return fail('verify error: ' + e.message);
   }

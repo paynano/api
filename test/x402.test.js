@@ -164,3 +164,42 @@ test('payment header decoding accepts PAYMENT-SIGNATURE and X-PAYMENT', () => {
   assert.equal(x.paymentHeader({}), null);
   assert.ok(x.decodePayment('not base64!').error);
 });
+
+// Seller-side work: work is not signed, so a block with work "0" (or none) is accepted when a
+// workGenerate dep exists; the generated work must validate; without the dep it is rejected.
+test('missing work is computed by the seller when workGenerate is given', async () => {
+  const b = makeBlock({ work: '0' });
+  let asked = null;
+  const r = await x.verify(payload(b), REQ, deps({ workGenerate: async h => { asked = h; return work; } }));
+  assert.equal(r.ok, true, r.reason);
+  assert.equal(asked, FRONTIER);
+  assert.equal(r.block.work, work.toLowerCase());
+  assert.equal(r.workBy, 'seller');
+  assert.equal('work_by' in r.block, false);
+  const rc = await x.verify(payload(makeBlock()), REQ, deps({ workGenerate: async () => { throw new Error('must not be called'); } }));
+  assert.equal(rc.ok, true, rc.reason); assert.equal(rc.workBy, 'client');
+  const b2 = makeBlock(); delete b2.work;
+  const r2 = await x.verify(payload(b2), REQ, deps({ workGenerate: async () => work }));
+  assert.equal(r2.ok, true, r2.reason);
+});
+
+test('missing work without a workGenerate dep is rejected, and a bad source fails cleanly', async () => {
+  const r = await x.verify(payload(makeBlock({ work: '0' })), REQ, deps());
+  assert.equal(r.ok, false); assert.match(r.reason, /work/);
+  const r2 = await x.verify(payload(makeBlock({ work: '0' })), REQ, deps({ workGenerate: async () => { throw new Error('gpu down'); } }));
+  assert.equal(r2.ok, false); assert.match(r2.reason, /gpu down/);
+  const r3 = await x.verify(payload(makeBlock({ work: '0' })), REQ, deps({ workGenerate: async () => '0000000000000001' }));
+  assert.equal(r3.ok, false); assert.match(r3.reason, /below threshold/);
+});
+
+test('work is only generated after the cheap checks pass', async () => {
+  let called = 0;
+  const r = await x.verify(payload(makeBlock({ work: '0', balance: '1' })), REQ, deps({ workGenerate: async () => { called++; return work; } }));
+  assert.equal(r.ok, false); assert.equal(called, 0);
+});
+
+test('requirements can advertise optional work', () => {
+  const req = x.requirements({ payTo: PAY_TO, amountRaw: AMOUNT, workOptional: true });
+  assert.deepEqual(req.extra, { work: 'optional' });
+  assert.deepEqual(REQ.extra, {});
+});

@@ -60,7 +60,11 @@ async function work(hash, origin) {
   const balance = BigInt(info.balance) - BigInt(accepted.amount);
   if (balance < 0n) throw new Error(`insufficient balance: have ${info.balance} raw`);
 
-  const w = await work(info.frontier, new URL(url).origin);
+  // Sellers that advertise extra.work = 'optional' compute the work themselves (work is not
+  // signed, so the seller can add it): send "0" and skip the wait. Set FORCE_WORK=1 to opt out.
+  const sellerWork = accepted.extra && accepted.extra.work === 'optional' && !process.env.FORCE_WORK;
+  const w = sellerWork ? '0' : await work(info.frontier, new URL(url).origin);
+  if (sellerWork) console.error('seller computes the work; skipping work_generate');
   const { block, hash } = N.createBlock(sk, { work: w, previous: info.frontier, representative: info.representative, balance: balance.toString(), link: accepted.payTo });
   block.account = block.account.replace(/^xrb_/, 'nano_');
   console.error('signed block', hash);
