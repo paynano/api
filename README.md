@@ -63,6 +63,10 @@ RPC, and answers with `PAYMENT-RESPONSE` carrying the hash. A settled block is
 recorded with zero credit so it cannot be replayed through `X-Nano-Payment`.
 Client: [`examples/client-x402.js`](examples/client-x402.js) (needs only
 `nanocurrency`; works against any `nano:mainnet` x402 seller).
+To open a fresh client account from a pending send: [`examples/receive.js`](examples/receive.js).
+Tested end to end on 2026-09-07: two paid calls from a separate account settled
+through the node, replay refused; verify plus settle takes about 0.2 s, the
+client's time is all work generation (see `/v1/work`).
 
 ## Running your own
 
