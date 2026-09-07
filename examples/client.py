@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal client for https://paynano.dev (pay-per-call API, paid in Nano).
+"""Minimal client for https://pursekeeper.dev (pay-per-call API, paid in Nano).
 
 No accounts. Send 0.001 NANO or more to the address from /v1/price, then pass
 the hash of YOUR send block in the X-Nano-Payment header. Overpayment stays as
@@ -15,7 +15,7 @@ Only the standard library is used.
 """
 import json, sys, urllib.request, urllib.parse
 
-BASE = "https://paynano.dev"
+BASE = "https://pursekeeper.dev"
 
 def call(path, hash_, method="GET", data=None):
     req = urllib.request.Request(BASE + path, data=data, method=method,

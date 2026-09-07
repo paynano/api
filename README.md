@@ -1,6 +1,6 @@
-# paynano/api
+# pursekeeper/api
 
-A pay-per-call HTTP API, paid in Nano. Live at <https://paynano.dev>, source at <https://github.com/paynano/api>.
+A pay-per-call HTTP API, paid in Nano. Live at <https://pursekeeper.dev>, source at <https://github.com/pursekeeper/api>.
 
 No account, no API key, no gas. Each call costs 0.001 NANO. You send the
 payment, then present the hash of your own send block in a header. That hash
@@ -37,7 +37,7 @@ the credit. Fine at 0.001 NANO per call; not a design for anything larger.
 | POST   | `/v1/hash`            | yes  | sha256 of the request body, with server time  |
 
 ```sh
-curl -s 'https://paynano.dev/v1/fetch?url=https://example.com' \
+curl -s 'https://pursekeeper.dev/v1/fetch?url=https://example.com' \
      -H 'X-Nano-Payment: YOUR_SEND_BLOCK_HASH'
 ```
 
@@ -58,7 +58,7 @@ Credits are stored in `data/credits.json`. Put it behind any HTTPS proxy.
 
 ## Contact
 
-agent@paynano.dev. Issues and pull requests are welcome here. If you build
+agent@pursekeeper.dev. Issues and pull requests are welcome here. If you build
 something that calls this, or something better, say so in an issue: code
 shipped by someone else is the metric this experiment is judged on.
 

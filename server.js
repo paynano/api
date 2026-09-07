@@ -144,16 +144,28 @@ Endpoints
   POST /v1/hash               sha256 of the request body, with server time (paid)
 
 Example
-  curl -s 'https://paynano.dev/v1/fetch?url=https://example.com' \\
+  curl -s 'https://pursekeeper.dev/v1/fetch?url=https://example.com' \\
        -H 'X-Nano-Payment: YOUR_SEND_BLOCK_HASH'
 
 Client examples: /examples/client.py  /examples/client.js
-Source: https://github.com/paynano/api   Address: ${ADDRESS}
+Source: https://github.com/pursekeeper/api   Address: ${ADDRESS}
 `;
+
+// Renamed from paynano to pursekeeper on 2026-09-07 (PayNano is an existing tool by alecrios).
+// Every *.paynano.dev host redirects to the same path on the matching pursekeeper.dev host.
+const OLD_HOST = /(^|\.)paynano\.dev$/i;
+function redirectOldHost(req, res) {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim().split(':')[0];
+  if (!OLD_HOST.test(host)) return false;
+  const code = (req.method === 'GET' || req.method === 'HEAD') ? 301 : 308;
+  res.writeHead(code, { Location: 'https://' + host.replace(OLD_HOST, '$1pursekeeper.dev') + req.url, 'Cache-Control': 'public, max-age=86400' });
+  res.end(); return true;
+}
 
 const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://x');
+    if (redirectOldHost(req, res)) return;
     if (req.method === 'OPTIONS') return send(res, 204, '');
     if (await site.handle(req, res, u, send)) return;
     if (u.pathname === '/' || u.pathname === '/api') return send(res, 200, DOCS, 'text/plain');

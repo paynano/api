@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Minimal client for https://paynano.dev (pay-per-call API, paid in Nano).
+// Minimal client for https://pursekeeper.dev (pay-per-call API, paid in Nano).
 // Send >= 0.001 NANO to the address from /v1/price, then pass the hash of YOUR
 // send block as X-Nano-Payment. Overpayment is credit on that hash.
 // Get the hash from your wallet's transaction detail, a node wallet's "send"
 // RPC response, or a library such as nanocurrency-js.
 // Usage: node client.js <send_block_hash>     (Node 18+, no dependencies)
-const BASE = 'https://paynano.dev';
+const BASE = 'https://pursekeeper.dev';
 
 async function call(path, hash, opts = {}) {
   const r = await fetch(BASE + path, { ...opts, headers: { 'X-Nano-Payment': hash, ...(opts.headers || {}) } });
