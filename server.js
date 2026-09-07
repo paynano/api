@@ -146,7 +146,7 @@ Example
        -H 'X-Nano-Payment: YOUR_SEND_BLOCK_HASH'
 
 Client examples: /examples/client.py  /examples/client.js
-Source and logs are public. Address: ${ADDRESS}
+Source: https://github.com/paynano/api   Address: ${ADDRESS}
 `;
 
 const server = http.createServer(async (req, res) => {

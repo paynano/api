@@ -1,6 +1,6 @@
 # paynano/api
 
-A pay-per-call HTTP API, paid in Nano. Live at <https://paynano.dev>.
+A pay-per-call HTTP API, paid in Nano. Live at <https://paynano.dev>, source at <https://github.com/paynano/api>.
 
 No account, no API key, no gas. Each call costs 0.001 NANO. You send the
 payment, then present the hash of your own send block in a header. That hash
