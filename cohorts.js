@@ -106,8 +106,21 @@ function readLedger() {
 // A refund flag in the ledger, if the agent ever sets one: meta_json {"refund": true}
 // or a reason starting with "refund" / containing "[refund]". Such rows are not
 // counterparty payments and are left out.
+// Also data/refunds.json: [{"hash": "<block hash>", "note": "why"}], kept by hand for
+// inbound blocks the ledger recorded as plain receipts (e.g. a seller returning change).
+let refundHashes = null;
+function loadRefundHashes() {
+  if (refundHashes) return refundHashes;
+  refundHashes = new Set();
+  try {
+    const list = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'data', 'refunds.json'), 'utf8'));
+    for (const x of list) if (x && x.hash) refundHashes.add(String(x.hash).toUpperCase());
+  } catch {}
+  return refundHashes;
+}
 function isRefund(r) {
   let meta = {}; try { meta = JSON.parse(r.meta_json || '{}') || {}; } catch {}
+  if (r.block_hash && loadRefundHashes().has(String(r.block_hash).toUpperCase())) return true;
   return !!meta.refund || /^refund\b/i.test(r.reason || '') || /\[refund\]/i.test(r.reason || '');
 }
 
