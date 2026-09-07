@@ -29,6 +29,11 @@ const X402_LOG = path.join(__dirname, 'data', 'x402.json');   // settled x402 bl
 // e.g. a keyed hosted GPU work server), then the local node. Clients may omit block.work on
 // the x402 path (extra.work = 'optional'); we compute it here before broadcasting.
 const WORK_URLS = (process.env.WORK_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
+// PAID_WORK_URLS: sources reserved for paid requests (x402 settles and paid /v1/work), tried before
+// WORK_URLS. Currently a GPU reached over a private tunnel; it is not a free public service, so the
+// free tier never touches it. Paying Ӿ0.001 is what buys sub-second work here.
+const PAID_WORK_URLS = (process.env.PAID_WORK_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
+const workName = u => { const h = new URL(u).host; return /^(127\.|localhost)/.test(h) ? 'gpu' : h; };
 const X402_REQ = x402.requirements({ payTo: ADDRESS, amountRaw: PRICE_RAW, maxTimeoutSeconds: 60, workOptional: true });
 const x402Reference = new X402Reference(new Helper({ NANO_RPC_URL: RPC })); // reference verify() runs in addition to ours
 const settling = new Set();                                    // block hashes with a "process" call in flight
@@ -49,15 +54,16 @@ async function rpc(body) {
 // work_generate for `hash` at the send threshold via the first source that answers.
 // Returns { work, source, ms } or throws with the last error.
 const workStats = { generated: 0, by_source: {}, last_error: '' };
-async function workFor(hash, { timeoutMs = 30_000 } = {}) {
-  const sources = [...WORK_URLS.map(u => ({ name: new URL(u).host, url: u })), { name: 'node', url: RPC }];
+async function workFor(hash, { timeoutMs = 30_000, paid = false } = {}) {
+  const sources = [...(paid ? PAID_WORK_URLS : []).map(u => ({ name: workName(u), url: u, timeoutMs: 15_000 })),
+                   ...WORK_URLS.map(u => ({ name: workName(u), url: u, timeoutMs })), { name: 'node', url: RPC, timeoutMs: 180_000 }];
   let lastErr = 'no work source';
   for (const src of sources) {
     const t0 = Date.now();
     try {
       const r = await fetch(src.url, { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action: 'work_generate', hash, difficulty: x402.WORK_THRESHOLD }),
-        signal: AbortSignal.timeout(src.name === 'node' ? 180_000 : timeoutMs) });
+        signal: AbortSignal.timeout(src.timeoutMs) });
       const j = await r.json();
       if (j && j.work) {
         workStats.generated++; workStats.by_source[src.name] = (workStats.by_source[src.name] || 0) + 1;
@@ -137,7 +143,7 @@ async function chargeX402(req, res, headerValue) {
     accountInfo: account => rpc({ action: 'account_info', account, representative: 'true' }),
     seen: async h => (h in credits) || settling.has(h),
     reference: x402Reference,
-    workGenerate: async hash => (await workFor(hash)).work   // a paying block earns its work
+    workGenerate: async hash => (await workFor(hash, { paid: true })).work   // a paying block earns its work
   });
   if (!v.ok) return paymentRequired(res, 'x402: ' + v.reason, req), false;
   settling.add(v.hash);
@@ -183,7 +189,7 @@ async function workGenerate(req, res) {
   if (workInFlight >= 2) return send(res, 503, { error: 'work server busy; retry in a few seconds' });
   workInFlight++;
   try {
-    const r = await workFor(hash);
+    const r = await workFor(hash, { paid });
     return send(res, 200, { hash, work: r.work, threshold: x402.WORK_THRESHOLD, source: r.source, ms: r.ms, paid });
   } catch (e) { return send(res, 502, { error: 'work_generate: ' + e.message }); }
   finally { workInFlight--; }
@@ -279,8 +285,9 @@ Endpoints
   POST /v1/hash               sha256 of the request body, with server time (paid)
   GET  /v1/x402               x402 payment requirements for the paid endpoints (free)
   POST /v1/work  {"hash":H}   work_generate at the send threshold for any hash: 3 per minute
-                              per IP free; with X-Nano-Payment credit or an x402 payment
-                              header, ${nano(PRICE_RAW)} NANO per work and no limit
+                              per IP free (CPU, seconds); with X-Nano-Payment credit or an x402
+                              payment header, ${nano(PRICE_RAW)} NANO per work, GPU, about a
+                              second, no limit
 
 Example
   curl -s 'https://pursekeeper.dev/v1/fetch?url=https://example.com' \\
@@ -316,7 +323,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (u.pathname === '/v1/price') return send(res, 200, { pay_to: ADDRESS, price_raw: PRICE_RAW.toString(), price_nano: nano(PRICE_RAW) });
     if (u.pathname === '/v1/stats') return send(res, 200, { ...stats, credited_hashes: Object.keys(credits).length, x402_settled: x402Log.length,
-      x402_work_by_seller: x402Log.filter(e => e.work_by === 'seller').length, work: workStats, work_sources: [...WORK_URLS.map(u => new URL(u).host), 'node'] });
+      x402_work_by_seller: x402Log.filter(e => e.work_by === 'seller').length, work: workStats, work_sources: { paid: [...PAID_WORK_URLS.map(workName), ...WORK_URLS.map(workName), 'node'], free: [...WORK_URLS.map(workName), 'node'] } });
     if (u.pathname === '/v1/x402') return send(res, 200, {
       x402Version: x402.X402_VERSION, accepts: [X402_REQ],
       resource: { url: 'https://' + hostOf(req) + '/v1/{echo,fetch,hash}', description: 'pursekeeper.dev pay-per-call API', mimeType: 'application/json' },
@@ -324,7 +331,7 @@ const server = http.createServer(async (req, res) => {
       response_header: 'PAYMENT-RESPONSE: base64 JSON {success, transaction, network, payer}',
       block_rules: 'state block from your current confirmed frontier; balance = current balance - amount exactly; link = payTo; work optional (extra.work = "optional"): omit it or send "0" and this seller computes it before broadcasting; if you send work it must be valid at ' + x402.WORK_THRESHOLD + ' against previous',
       work: 'POST /v1/work {"hash": "<frontier>"}: 3 per minute per IP free, or pay ' + nano(PRICE_RAW) + ' NANO per work (same headers) with no limit; for sends to anyone else', example: '/examples/client-x402.js', spec: 'https://github.com/x402nano/schemes',
-      work_sources: [...WORK_URLS.map(u => new URL(u).host), 'node'] });
+      work_sources: { paid: [...PAID_WORK_URLS.map(workName), ...WORK_URLS.map(workName), 'node'], free: [...WORK_URLS.map(workName), 'node'] } });
     if (u.pathname === '/v1/work' && req.method === 'POST') return workGenerate(req, res);
     if (u.pathname === '/v1/credit') {
       const c = await creditFor(u.searchParams.get('hash') || '');
