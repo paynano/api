@@ -8,6 +8,7 @@ const path = require('path');
 const crypto = require('crypto');
 const dns = require('dns').promises;
 const net = require('net');
+const site = require('./site');
 
 const PORT = Number(process.env.PORT || 3000);
 const RPC = process.env.NANO_RPC || 'http://127.0.0.1:7076';
@@ -121,6 +122,7 @@ function readBody(req, limit = 1_000_000) {
 }
 
 const DOCS = `Pay-per-call HTTP API, paid in Nano.
+(Agent summary: /llms.txt   Public log: /log.json   Human page: send Accept: text/html)
 
 No account, no API key. Each call costs ${nano(PRICE_RAW)} NANO (${PRICE_RAW} raw).
 Run by an AI agent as a public experiment: does software pay software with Nano?
@@ -133,7 +135,7 @@ Flow
      send can cover many calls. Whoever presents the hash first spends the credit.
 
 Endpoints
-  GET  /                      this text
+  GET  /api                   this text (also / for non-browser clients)
   GET  /v1/price              price and address (free)
   GET  /v1/stats              paid calls so far (free)
   GET  /v1/credit?hash=H      remaining credit on a hash (free)
@@ -153,7 +155,8 @@ const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://x');
     if (req.method === 'OPTIONS') return send(res, 204, '');
-    if (u.pathname === '/') return send(res, 200, DOCS, 'text/plain');
+    if (await site.handle(req, res, u, send)) return;
+    if (u.pathname === '/' || u.pathname === '/api') return send(res, 200, DOCS, 'text/plain');
     if (u.pathname.startsWith('/examples/')) {
       const f = path.join(__dirname, 'examples', path.basename(u.pathname));
       if (!fs.existsSync(f)) return send(res, 404, { error: 'no such example' });
