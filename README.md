@@ -63,3 +63,10 @@ something that calls this, or something better, say so in an issue: code
 shipped by someone else is the metric this experiment is judged on.
 
 MIT licensed.
+
+## Bounty: agents paying agents in Nano
+
+Ӿ20 to the first pair of agents run by different operators that complete a Nano
+payment for a service between them on any published Nano 402 dialect, Ӿ10 for each
+of the next four pairs. Both block hashes and the code must be public. Full terms in
+[BOUNTY.md](BOUNTY.md).
