@@ -212,8 +212,13 @@ function classify(cp, chain) {
   };
 }
 
+// An address counts as a counterparty if pursekeeper paid it, or once it has sent
+// site.COUNTERPARTY_MIN_NANO in total (the agent's wallet_status rule; dust from
+// throwaway accounts is listed but not counted).
+function countsAsCounterparty(r) { return r.paid_count > 0 || BigInt(r.received_raw) >= site.COUNTERPARTY_MIN_RAW; }
+
 function totalsOf(rows) {
-  const t = { counterparties: rows.length,
+  const t = { counterparties: rows.filter(countsAsCounterparty).length, below_threshold: rows.filter(r => !countsAsCounterparty(r)).length, min_nano: site.COUNTERPARTY_MIN_NANO,
     wallet_state: { opened_by_us: 0, already_funded: 0, unopened: 0, opened_later_by_other: 0, 'n/a': 0, unknown: 0 },
     funding: { grant_funded: 0, independently_earned: 0, grant_funded_and_paid_us: 0 },
     first_spend: { to_us: 0, elsewhere: 0, none_yet: 0, unknown: 0, 'n/a': 0 },
@@ -248,6 +253,7 @@ async function computeCohorts({ ledger = readLedger(), rpc = cachedRpc } = {}) {
         reasons: cp.reasons.map(r => site.redact(r).slice(0, REASON_CHARS)), initiative_ids: cp.initiative_ids, chain_error: e.message });
     }
   }
+  for (const r of rows) r.counts_as_counterparty = countsAsCounterparty(r);
   rows.sort((a, b) => (a.interactions.first_at || '').localeCompare(b.interactions.first_at || ''));
   return { generated_at: new Date().toISOString(), address: ADDRESS, window_days: WINDOW_DAYS, scan_limit: SCAN, rows, totals: totalsOf(rows) };
 }
@@ -286,7 +292,7 @@ function render(d) {
   const { esc, xno, addr, hash, when } = site;
   const w = t => t ? `<span class="num">${when(t)}</span>` : '';
   const t = d.totals;
-  const rows = d.rows.map(r => `<tr><td>${addr(r.address)}<br><small class="num">paid ${xno(r.paid_raw)} (${r.paid_count}) · received ${xno(r.received_raw)} (${r.received_count})</small></td>
+  const rows = d.rows.map(r => `<tr><td>${addr(r.address)}<br><small class="num">paid ${xno(r.paid_raw)} (${r.paid_count}) · received ${xno(r.received_raw)} (${r.received_count})</small>${r.counts_as_counterparty === false ? '<br><small class="muted">below the Ӿ' + esc(t.min_nano) + ' threshold: listed, not counted</small>' : ''}</td>
 <td>${esc(WALLET[r.wallet_state] || r.wallet_state)}${r.chain_error ? `<br><small class="dead">chain: ${esc(r.chain_error)}</small>` : ''}</td>
 <td>${esc(fundingText(r))}</td>
 <td>${receiptText(r, w)}${r.first_receipt && !r.first_receipt.pending ? ' ' + hash(r.first_receipt.hash) : ''}<br><small>→ ${spendText(r, w, addr)}${r.first_spend ? ' ' + hash(r.first_spend.hash) : ''}</small></td>
@@ -298,14 +304,14 @@ ${intro()}
 ${rows || '<tr><td colspan="6" class="muted">no counterparties yet</td></tr>'}</table>
 <h2>Totals</h2>
 <table>
-<tr><td>counterparties</td><td class="num">${t.counterparties}</td></tr>
+<tr><td>counterparties</td><td class="num">${t.counterparties}${t.below_threshold ? ` <small>(+${t.below_threshold} address${t.below_threshold === 1 ? '' : 'es'} below the threshold)</small>` : ''}</td></tr>
 <tr><td>wallet state</td><td>${Object.entries(t.wallet_state).filter(([, n]) => n).map(([k, n]) => `${esc(WALLET[k] || k)}: ${n}`).join(' · ') || '–'}</td></tr>
 <tr><td>funding</td><td>grant-funded: ${t.funding.grant_funded} · independently earned: ${t.funding.independently_earned} · grant-funded and also paid us: ${t.funding.grant_funded_and_paid_us}</td></tr>
 <tr><td>first spend after our payment</td><td>to us: ${t.first_spend.to_us} · elsewhere: ${t.first_spend.elsewhere} · none yet: ${t.first_spend.none_yet} · unknown: ${t.first_spend.unknown}</td></tr>
 <tr><td>repeat</td><td>one-off: ${t.repeat.one_off} · repeat within ${WINDOW_DAYS} days: ${t.repeat.repeat_within_30d}</td></tr>
 <tr><td>paid / received</td><td class="num">${xno(t.paid_raw)} / ${xno(t.received_raw)}</td></tr>
 </table>
-<p class="muted">Generated ${when(d.generated_at)} from <a href="${EXPLORER}${ADDRESS}"><code>${short(ADDRESS)}</code></a>. Excluded: pursekeeper's own addresses, the funder's tranches, and blocks listed in data/refunds.json (change returned by a seller, not a purchase from pursekeeper). "Unopened" means the account has no blocks yet because pursekeeper's send has not been received. Chain times are when the local node saw each block.</p>`;
+<p class="muted">Generated ${when(d.generated_at)} from <a href="${EXPLORER}${ADDRESS}"><code>${short(ADDRESS)}</code></a>. Excluded: pursekeeper's own addresses, the funder's tranches, and blocks listed in data/refunds.json (change returned by a seller, not a purchase from pursekeeper). "Unopened" means the account has no blocks yet because pursekeeper's send has not been received. Chain times are when the local node saw each block. An address that paid pursekeeper counts as a counterparty only once it has sent Ӿ${esc(t.min_nano)} in total, the same rule the agent's wallet tool applies; addresses below that are listed but not counted. Addresses pursekeeper paid count regardless.</p>`;
   return site.page('pursekeeper: counterparty cohorts', body, 'Per-address cohorts for every counterparty of the pursekeeper agent: opened by its payment or already funded, grant-funded or independently earned, first spend, repeat.');
 }
 
@@ -319,7 +325,7 @@ function markdown(d) {
     const sp = spendText(r, s => s.replace('T', ' ').slice(0, 16), short);
     lines.push(`| ${short(r.address)} | ${WALLET[r.wallet_state] || r.wallet_state} | ${fundingText(r)} | ${rec} → ${sp} | ${repeatText(r)} | ${xno(r.paid_raw)} / ${xno(r.received_raw)} | ${r.reasons.join('; ').replace(/\|/g, '/')}${r.initiative_ids.length ? ' (#' + r.initiative_ids.join(', #') + ')' : ''} |`);
   }
-  lines.push('', `Totals: ${Object.entries(t.wallet_state).filter(([, n]) => n).map(([k, n]) => `${WALLET[k] || k} ${n}`).join(', ')}; grant-funded ${t.funding.grant_funded}, independently earned ${t.funding.independently_earned}, both ${t.funding.grant_funded_and_paid_us}; first spend to us ${t.first_spend.to_us}, elsewhere ${t.first_spend.elsewhere}, none yet ${t.first_spend.none_yet}; one-off ${t.repeat.one_off}, repeat within ${WINDOW_DAYS} days ${t.repeat.repeat_within_30d}.`);
+  lines.push('', `Totals: ${t.counterparties} counterpart${t.counterparties === 1 ? 'y' : 'ies'}${t.below_threshold ? ` (+${t.below_threshold} below the ${t.min_nano} XNO threshold)` : ''}; ${Object.entries(t.wallet_state).filter(([, n]) => n).map(([k, n]) => `${WALLET[k] || k} ${n}`).join(', ')}; grant-funded ${t.funding.grant_funded}, independently earned ${t.funding.independently_earned}, both ${t.funding.grant_funded_and_paid_us}; first spend to us ${t.first_spend.to_us}, elsewhere ${t.first_spend.elsewhere}, none yet ${t.first_spend.none_yet}; one-off ${t.repeat.one_off}, repeat within ${WINDOW_DAYS} days ${t.repeat.repeat_within_30d}.`);
   return lines.join('\n');
 }
 
@@ -331,7 +337,7 @@ async function handle(req, res, u, send) {
   return false;
 }
 
-module.exports = { ownFromFile, computeCohorts, classify, collect, addChainOnly, isRefund, totalsOf, render, markdown, handle, ZERO, SCAN, WINDOW_DAYS };
+module.exports = { ownFromFile, computeCohorts, classify, collect, addChainOnly, isRefund, totalsOf, countsAsCounterparty, render, markdown, handle, ZERO, SCAN, WINDOW_DAYS };
 
 if (require.main === module) {
   computeCohorts().then(d => console.log(markdown(d))).catch(e => { console.error(e.message); process.exit(1); });

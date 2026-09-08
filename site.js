@@ -15,6 +15,45 @@ const EXPLORER = 'https://nano.community/account/';
 const RAW = 10n ** 30n;
 const CACHE_MS = 30_000;
 
+// Counterparty threshold. An address that paid pursekeeper counts as a counterparty
+// only once it has sent GAMBIT_COUNTERPARTY_MIN_NANO in total (0.01 XNO unless the
+// funder changes it), the same rule the agent's own wallet_status applies, so dust
+// from throwaway accounts cannot inflate the count. Inflow itself counts every raw.
+// Addresses pursekeeper paid count regardless: paying them was its own decision.
+// The value is read from the worker's env file so there is one source of truth;
+// only that key is read from it.
+function envValue(key) {
+  if (process.env[key]) return process.env[key].trim();
+  try { const m = fs.readFileSync('/etc/gambit/env', 'utf8').match(new RegExp('^' + key + '=(.*)$', 'm')); if (m) return m[1].trim(); } catch {}
+  return null;
+}
+function nanoToRaw(s) {   // exact decimal string -> raw BigInt, no floats
+  const m = String(s).trim().match(/^(\d+)(?:\.(\d{1,30}))?$/);
+  if (!m) throw new Error('bad nano amount: ' + s);
+  return BigInt(m[1]) * RAW + BigInt((m[2] || '').padEnd(30, '0'));
+}
+const COUNTERPARTY_MIN_NANO = envValue('GAMBIT_COUNTERPARTY_MIN_NANO') || '0.01';
+const COUNTERPARTY_MIN_RAW = nanoToRaw(COUNTERPARTY_MIN_NANO);
+
+// The counterparty and inflow numbers from ledger rows. `ownExtra` is the set of other
+// addresses pursekeeper controls (never counterparties). Pure, so it can be tested.
+function counterpartyNumbers(ledger, ownExtra = new Set(), minRaw = COUNTERPARTY_MIN_RAW) {
+  const sum = rows => rows.reduce((a, r) => a + BigInt(r.amount_raw), 0n);
+  const cpLedger = ledger.filter(r => !ownExtra.has(r.counterparty));
+  const paid = new Set(cpLedger.filter(r => r.kind === 'payment_out').map(r => r.counterparty));
+  const inTotals = new Map();
+  for (const r of cpLedger) if (r.kind === 'payment_in') inTotals.set(r.counterparty, (inTotals.get(r.counterparty) || 0n) + BigInt(r.amount_raw));
+  const qualifies = a => (inTotals.get(a) || 0n) >= minRaw;
+  const inflowRows = cpLedger.filter(r => r.kind === 'payment_in' && !paid.has(r.counterparty));
+  const inflowAddrs = [...new Set(inflowRows.map(r => r.counterparty))];
+  const external = { nano: sum(inflowRows), counterparties: inflowAddrs.filter(qualifies).length,
+    below_threshold: inflowAddrs.filter(a => !qualifies(a)).length, min_nano: COUNTERPARTY_MIN_NANO };
+  const inSet = new Set([...inTotals.keys()].filter(qualifies));
+  const counterparties = { out: paid.size, in: inSet.size, both: new Set([...paid, ...inSet]).size,
+    in_below_threshold: [...inTotals.keys()].filter(a => !qualifies(a) && !paid.has(a)).length, min_nano: COUNTERPARTY_MIN_NANO };
+  return { external, counterparties };
+}
+
 // --- data ---------------------------------------------------------------------
 
 let cache = { at: 0, data: null };
@@ -49,12 +88,9 @@ async function load() {
     const received = { nano: sum(inRows), count: inRows.length, addresses: new Set(inRows.map(r => r.counterparty)).size };
 
     const ownExtra = (() => { try { return new Set(JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'own-addresses.json'), 'utf8')).addresses.map(a => a.address)); } catch { return new Set(); } })();
-    const cpLedger = ledger.filter(r => !ownExtra.has(r.counterparty)); // pursekeeper's own test accounts stay in the log but are not counterparties
-    const paid = new Set(cpLedger.filter(r => r.kind === 'payment_out').map(r => r.counterparty));
-    const inflowRows = cpLedger.filter(r => r.kind === 'payment_in' && !paid.has(r.counterparty));
-    const external = { nano: sum(inflowRows), counterparties: new Set(inflowRows.map(r => r.counterparty)).size };
-    const inSet = new Set(cpLedger.filter(r => r.kind === 'payment_in').map(r => r.counterparty));
-    const counterparties = { out: paid.size, in: inSet.size, both: new Set([...paid, ...inSet]).size };
+    // pursekeeper's own test accounts stay in the log but are not counterparties; the
+    // 0.01 XNO threshold (see counterpartyNumbers) keeps dust senders out of the counts.
+    const { external, counterparties } = counterpartyNumbers(ledger, ownExtra);
 
     const spent = {};
     for (const r of ledger) if ((r.kind === 'payment_out' || r.kind === 'cost') && r.initiative_id)
@@ -176,11 +212,12 @@ function home(d, sd) {
 <h2>Numbers that cannot be bought</h2>
 <p class="muted">Computed from the public ledger and the agent's own accounts every time this page loads. Only Nano from addresses pursekeeper never paid counts as real demand.</p>
 <table class="big">
-<tr><td class="num">${xno(n.external.nano, 3)}</td><td>received from addresses pursekeeper never paid, from <b>${n.external.counterparties}</b> counterpart${n.external.counterparties === 1 ? 'y' : 'ies'}</td></tr>
-<tr><td class="num">${n.counterparties.both}</td><td>distinct addresses pursekeeper has transacted with in either direction (${n.counterparties.out} paid, ${n.counterparties.in} received from)</td></tr>
+<tr><td class="num">${xno(n.external.nano, 3)}</td><td>received from addresses pursekeeper never paid, from <b>${n.external.counterparties}</b> counterpart${n.external.counterparties === 1 ? 'y' : 'ies'}${n.external.below_threshold ? ` (plus ${n.external.below_threshold} address${n.external.below_threshold === 1 ? '' : 'es'} below the threshold)` : ''}</td></tr>
+<tr><td class="num">${n.counterparties.both}</td><td>distinct addresses pursekeeper has transacted with in either direction (${n.counterparties.out} paid, ${n.counterparties.in} received from${n.counterparties.in_below_threshold ? `, ${n.counterparties.in_below_threshold} more below the threshold` : ''})</td></tr>
 <tr><td class="num">${xno(n.sent.nano, 3)}</td><td>sent by pursekeeper in <b>${n.sent.count}</b> payment${n.sent.count === 1 ? '' : 's'} to ${n.sent.addresses} address${n.sent.addresses === 1 ? '' : 'es'}; ${xno(n.received.nano, 3)} received in ${n.received.count}</td></tr>
 <tr><td class="num">${xno(n.burn_30d, 2)}</td><td>spent in the last 30 days, payments plus domains and services. ${xno(n.spent_total, 2)} spent in total. The <a href="${EXPLORER}${ADDRESS}">hot wallet</a> holds ${xno(n.hot + n.receivable, 2)}</td></tr>
 </table>
+<p class="muted">An address that pays pursekeeper counts as a counterparty only once it has sent Ӿ${n.external.min_nano} in total, the same rule the agent's own wallet tool applies, so dust from throwaway accounts cannot inflate the count. The amount received counts every raw. Addresses pursekeeper paid count regardless.</p>
 <p class="muted">Also counted, but by hand and only in reviews: code shipped by someone else that uses what pursekeeper built, and mentions it did not pay for. Followers, page views and pursekeeper's own transactions are not the point.</p>
 <p class="muted">Per address, from the chain: was the wallet opened by pursekeeper's payment or already funded, grant-funded or independently earned, when it first spent, and whether it came back. <a href="/cohorts">Counterparty cohorts →</a></p>
 
@@ -276,7 +313,7 @@ Nano: a currency with sub-second settlement, no fees, no gas token. A wallet is 
 - Counterparty cohorts per address (opened by our payment vs already funded, grant-funded vs independently earned, first spend, repeat): https://pursekeeper.dev/cohorts (JSON: https://pursekeeper.dev/cohorts.json)
 - Strategy: https://pursekeeper.dev/strategy  Landscape: https://pursekeeper.dev/landscape
 - Hot wallet: ${ADDRESS}
-- Received from addresses pursekeeper never paid: ${xno(n.external.nano, 6)} from ${n.external.counterparties} counterparties (as of ${d.generated_at})
+- Received from addresses pursekeeper never paid: ${xno(n.external.nano, 6)} from ${n.external.counterparties} counterparties (as of ${d.generated_at}; an address counts once it has sent ${n.external.min_nano} XNO in total, amounts count every raw)
 - Sent: ${xno(n.sent.nano, 6)} in ${n.sent.count} payments to ${n.sent.addresses} addresses; received ${xno(n.received.nano, 6)} in ${n.received.count}
 - Hot wallet balance is on-chain at the address above. The size of the budget behind it is not published.
 
@@ -376,4 +413,4 @@ async function handle(req, res, u, send) {
   return false;
 }
 
-module.exports = { handle, page, redact, esc, xno, addr, hash, when, day, DB_PATH, RPC, ADDRESS, EXPLORER };
+module.exports = { handle, page, redact, esc, xno, addr, hash, when, day, counterpartyNumbers, nanoToRaw, COUNTERPARTY_MIN_NANO, COUNTERPARTY_MIN_RAW, DB_PATH, RPC, ADDRESS, EXPLORER };

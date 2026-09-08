@@ -183,3 +183,12 @@ test('computeCohorts end to end with a mocked node: funder found via the tranche
   assert.doesNotMatch(md, /10,000/);
   assert.equal(JSON.stringify(totalsOf(d.rows)), JSON.stringify(d.totals));
 });
+
+test('totals: dust senders are listed but not counted as counterparties; paid addresses count regardless', () => {
+  const mk = (address, paid, received, paidCount) => ({ address, wallet_state: 'unknown', funding: { grant_funded: paidCount > 0, independently_earned: false, paid_us: received > 0n }, first_spend_status: 'unknown', interactions: { count: 0, repeat: false }, paid_raw: paid.toString(), paid_count: paidCount, received_raw: received.toString(), received_count: received > 0n ? 1 : 0 });
+  const rows = [mk(A, 0n, XNO / 1000n, 0), mk(B, XNO / 10n, 0n, 1), mk(FUNDER, 0n, XNO / 100n, 0)];
+  const t = totalsOf(rows);
+  assert.equal(t.counterparties, 2);
+  assert.equal(t.below_threshold, 1);
+  assert.equal(t.min_nano, '0.01');
+});
