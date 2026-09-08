@@ -14,6 +14,7 @@ const net = require('net');
 const site = require('./site');
 const cohorts = require('./cohorts');
 const x402 = require('./x402');
+const nanocurrency = require('nanocurrency');
 const { Helper } = require('@x402nano/helper');
 const { ExactNanoScheme: X402Reference } = require('@x402nano/exact/facilitator');
 
@@ -94,7 +95,10 @@ async function creditFor(hash) {
   return { remaining: amount };
 }
 
-function nano(raw) { return (Number(raw) / 1e30).toString(); }
+function nano(raw) {   // exact decimal NANO string for a raw amount (no float rounding)
+  const r = BigInt(raw); const i = r / RAW_PER_NANO; const f = (r % RAW_PER_NANO).toString().padStart(30, '0').replace(/0+$/, '');
+  return f ? i + '.' + f : i.toString();
+}
 
 function send(res, code, body, type = 'application/json') {
   const data = typeof body === 'string' ? body : JSON.stringify(body, null, 1);
@@ -195,6 +199,63 @@ async function workGenerate(req, res) {
   finally { workInFlight--; }
 }
 
+
+// Free payment checks for sellers without a Nano node: is block H a confirmed send of at least
+// N raw to address A (/v1/verify), and which confirmed sends to A are still unpocketed
+// (/v1/receivable). Read-only against this node; 60 per minute per IP.
+const checkHits = new Map();
+function overFreeLimit(req, map, limit) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const now = Date.now();
+  const hits = (map.get(ip) || []).filter(t => now - t < 60_000);
+  if (hits.length >= limit) return true;
+  hits.push(now); map.set(ip, hits);
+  if (map.size > 10_000) map.clear();
+  return false;
+}
+function minRawOf(u) {
+  const raw = u.searchParams.get('min_raw'), n = u.searchParams.get('min_nano');
+  if (raw != null) { if (!/^\d{1,40}$/.test(raw)) throw new Error('min_raw must be an integer in raw'); return BigInt(raw); }
+  if (n != null) {
+    const m = /^(\d+)(?:\.(\d{1,30}))?$/.exec(n); if (!m) throw new Error('min_nano must be a decimal NANO amount');
+    return BigInt(m[1]) * RAW_PER_NANO + BigInt((m[2] || '').padEnd(30, '0'));
+  }
+  return 0n;
+}
+async function verifyBlock(req, res, u) {
+  if (overFreeLimit(req, checkHits, 60)) return send(res, 429, { error: 'limit is 60 checks per minute per IP' });
+  const hash = String(u.searchParams.get('hash') || '').toUpperCase();
+  if (!/^[0-9A-F]{64}$/.test(hash)) return send(res, 400, { error: 'hash must be 64 hex characters (a block hash)' });
+  const to = u.searchParams.get('to');
+  if (to && !nanocurrency.checkAddress(to)) return send(res, 400, { error: 'to must be a nano_ address' });
+  let minRaw; try { minRaw = minRawOf(u); } catch (e) { return send(res, 400, { error: e.message }); }
+  const b = await rpc({ action: 'block_info', json_block: 'true', hash });
+  if (b.error) return send(res, 404, { hash, found: false, ok: false, error: 'block not found on this node (not broadcast yet, or wrong hash); retry in a second' });
+  const amount = BigInt(b.amount || '0');
+  const confirmed = b.confirmed === 'true';
+  const dest = b.subtype === 'send' ? b.contents.link_as_account : null;
+  const reasons = [];
+  if (!confirmed) reasons.push('not confirmed yet; retry shortly');
+  if (b.subtype !== 'send') reasons.push('not a send block (subtype ' + b.subtype + ')');
+  if (to && dest && dest !== to) reasons.push('sent to ' + dest + ', not to ' + to);
+  if (minRaw > 0n && amount < minRaw) reasons.push('amount ' + amount + ' raw is below min ' + minRaw + ' raw');
+  return send(res, 200, { hash, found: true, ok: reasons.length === 0, reason: reasons.join('; ') || undefined,
+    confirmed, subtype: b.subtype, from: b.block_account, to: dest, amount_raw: amount.toString(), amount_nano: nano(amount),
+    height: Number(b.height), local_timestamp: Number(b.local_timestamp), checked_at: new Date().toISOString(), node: 'pursekeeper.dev' });
+}
+async function receivable(req, res, u) {
+  if (overFreeLimit(req, checkHits, 60)) return send(res, 429, { error: 'limit is 60 checks per minute per IP' });
+  const account = u.searchParams.get('account') || '';
+  if (!nanocurrency.checkAddress(account)) return send(res, 400, { error: 'account must be a nano_ address' });
+  let minRaw; try { minRaw = minRawOf(u); } catch (e) { return send(res, 400, { error: e.message }); }
+  const r = await rpc({ action: 'receivable', account, count: '100', source: 'true', include_only_confirmed: 'true', threshold: (minRaw > 0n ? minRaw : 1n).toString() });
+  if (r.error) return send(res, 502, { error: 'node: ' + r.error });
+  const blocks = Object.entries(r.blocks && typeof r.blocks === 'object' ? r.blocks : {}).map(([hash, v]) => ({ hash, amount_raw: String(v.amount), amount_nano: nano(v.amount), from: v.source }));
+  const total = blocks.reduce((a, b) => a + BigInt(b.amount_raw), 0n);
+  return send(res, 200, { account, count: blocks.length, total_raw: total.toString(), total_nano: nano(total), blocks, confirmed_only: true,
+    note: 'confirmed sends to this account that have not been pocketed with a receive block; each is final and spendable once received. Pocketing needs a signed receive block and work (POST /v1/work).', checked_at: new Date().toISOString(), node: 'pursekeeper.dev' });
+}
+
 async function charge(req, res) {
   const hash = req.headers['x-nano-payment'];
   if (!hash) {
@@ -284,6 +345,11 @@ Endpoints
   GET  /v1/fetch?url=U        fetches U and returns the page as plain text (paid)
   POST /v1/hash               sha256 of the request body, with server time (paid)
   GET  /v1/x402               x402 payment requirements for the paid endpoints (free)
+  GET  /v1/verify?hash=H&to=A&min_raw=N
+                              is block H a confirmed send of at least N raw to nano_ address A?
+                              (free, 60/min per IP; for sellers who take Nano and have no node)
+  GET  /v1/receivable?account=A&min_raw=N
+                              confirmed, unpocketed sends to A with amounts and senders (free, 60/min)
   POST /v1/work  {"hash":H}   work_generate at the send threshold for any hash: 3 per minute
                               per IP free (CPU, seconds); with X-Nano-Payment credit or an x402
                               payment header, ${nano(PRICE_RAW)} NANO per work, GPU, about a
@@ -333,6 +399,8 @@ const server = http.createServer(async (req, res) => {
       work: 'POST /v1/work {"hash": "<frontier>"}: 3 per minute per IP free, or pay ' + nano(PRICE_RAW) + ' NANO per work (same headers) with no limit; for sends to anyone else', example: '/examples/client-x402.js', spec: 'https://github.com/x402nano/schemes',
       work_sources: { paid: [...PAID_WORK_URLS.map(workName), ...WORK_URLS.map(workName), 'node'], free: [...WORK_URLS.map(workName), 'node'] } });
     if (u.pathname === '/v1/work' && req.method === 'POST') return workGenerate(req, res);
+    if (u.pathname === '/v1/verify') return verifyBlock(req, res, u);
+    if (u.pathname === '/v1/receivable') return receivable(req, res, u);
     if (u.pathname === '/v1/credit') {
       const c = await creditFor(u.searchParams.get('hash') || '');
       return send(res, c.error ? 400 : 200, c.error ? { error: c.error } : { remaining_raw: c.remaining.toString(), remaining_nano: nano(c.remaining) });

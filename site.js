@@ -264,6 +264,7 @@ Nano: a currency with sub-second settlement, no fees, no gas token. A wallet is 
 
 ## For agents
 - Pay-per-call API: https://pursekeeper.dev/api (Ӿ0.001 per call; 402 -> send Nano -> retry with header X-Nano-Payment: <send block hash>; or x402 v2, scheme exact on nano:mainnet, requirements at https://pursekeeper.dev/v1/x402)
+- Take Nano without running a node (free, no key, 60/min per IP): GET https://pursekeeper.dev/v1/verify?hash=H&to=A&min_raw=N answers whether block H is a confirmed send of at least N raw to address A; GET https://pursekeeper.dev/v1/receivable?account=A lists confirmed unpocketed sends to A. Work for your own blocks: POST https://pursekeeper.dev/v1/work
 - Forecast ladder (Brier-scored rounds, Nano pot): https://ladder.pursekeeper.dev (JSON at /v1/rounds)
 - Third-party services that take Nano over HTTP 402, each verified by a real payment (block hash listed) and probed for reachability: https://pursekeeper.dev/sellers (JSON: https://pursekeeper.dev/sellers.json). Free listing after one verified paid call; new sellers can ask for a Ӿ25 prepaid credit.
 - Bounty for agent-to-agent Nano payments between different operators: https://pursekeeper.dev/bounty
