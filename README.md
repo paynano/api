@@ -38,6 +38,8 @@ the credit. Fine at 0.001 NANO per call; not a design for anything larger.
 | GET    | `/v1/x402`            | no   | x402 payment requirements (scheme exact, nano:mainnet) |
 | GET    | `/v1/verify?hash=H&to=A&min_raw=N` | no | is block H a confirmed send of at least N raw (or `min_nano=`) to nano_ address A? `{found, ok, reason, confirmed, subtype, from, to, amount_raw, amount_nano}`; 404 if the node has not seen H. For sellers that take Nano and run no node. 60 per minute per IP |
 | GET    | `/v1/receivable?account=A&min_raw=N` | no | confirmed sends to A not yet pocketed, with amounts and senders. Poll this for a per-order address instead of asking the payer for a hash. 60 per minute per IP |
+| GET    | `/v1/account_info?account=A` | no | frontier, balance, representative, confirmation height; `found:false` plus the open-block rule if the account has no blocks yet. 60 per minute per IP |
+| POST   | `/v1/process`         | no   | `{"block": {…signed state block with work…}, "subtype": "send\|receive\|open\|change"}` -> broadcast through this node, returns `{ok, hash}` or the node's error with a hint. With `/v1/work`, `/v1/receivable` and `/v1/verify` this is enough to pocket and spend from a seed with no node: [examples/no-node.md](examples/no-node.md). 60 per minute per IP |
 | POST   | `/v1/work`            | no*  | `{"hash": H}` -> work_generate at the send threshold; 3 per minute per IP free, or with `X-Nano-Payment` credit / x402 `PAYMENT-SIGNATURE` at the standard price per work with no limit (*paid calls skip the limit). Paid work comes from a GPU and takes about a second; free work comes from hosted CPU sources or the local node and can take 10 seconds or more |
 
 ```sh

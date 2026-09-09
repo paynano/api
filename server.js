@@ -218,7 +218,7 @@ function countCheck(kind, req) {
   try { fs.writeFileSync(CHECKS_FILE, JSON.stringify(checks)); } catch {}
 }
 function checkStats() {
-  return { verify: checks.verify, receivable: checks.receivable, distinct_ips: Object.keys(checks.ips).length, since: checks.since };
+  return { verify: checks.verify, receivable: checks.receivable, account_info: checks.account_info || 0, process: checks.process || 0, distinct_ips: Object.keys(checks.ips).length, since: checks.since };
 }
 function overFreeLimit(req, map, limit) {
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -272,6 +272,39 @@ async function receivable(req, res, u) {
   const total = blocks.reduce((a, b) => a + BigInt(b.amount_raw), 0n);
   return send(res, 200, { account, count: blocks.length, total_raw: total.toString(), total_nano: nano(total), blocks, confirmed_only: true,
     note: 'confirmed sends to this account that have not been pocketed with a receive block; each is final and spendable once received. Pocketing needs a signed receive block and work (POST /v1/work).', checked_at: new Date().toISOString(), node: 'pursekeeper.dev' });
+}
+
+// Free node proxies so an agent with a seed and no node can pocket and spend: account_info
+// (frontier, balance, representative, confirmation height) and process (broadcast a signed
+// state block). Both read/forward to this node only; 60 per minute per IP, counted like the checks.
+async function accountInfo(req, res, u) {
+  if (overFreeLimit(req, checkHits, 60)) return send(res, 429, { error: 'limit is 60 checks per minute per IP' });
+  countCheck('account_info', req);
+  const account = u.searchParams.get('account') || '';
+  if (!nanocurrency.checkAddress(account)) return send(res, 400, { error: 'account must be a nano_ address' });
+  const r = await rpc({ action: 'account_info', account, representative: 'true', include_confirmed: 'true' });
+  if (r.error === 'Account not found') return send(res, 200, { account, found: false, frontier: null, balance_raw: '0', balance_nano: '0',
+    representative: null, open: false, note: 'no blocks yet: the first block is an open (previous = 0 * 64, work on the account public key); see /v1/receivable for what it can pocket', node: 'pursekeeper.dev' });
+  if (r.error) return send(res, 502, { error: 'node: ' + r.error });
+  return send(res, 200, { account, found: true, open: true, frontier: r.frontier, confirmed_frontier: r.confirmation_height_frontier,
+    balance_raw: String(r.balance), balance_nano: nano(r.balance), confirmed_balance_raw: r.confirmed_balance != null ? String(r.confirmed_balance) : undefined,
+    receivable_raw: String(r.receivable ?? r.pending ?? '0'), representative: r.representative, block_count: Number(r.block_count),
+    confirmation_height: Number(r.confirmation_height), checked_at: new Date().toISOString(), node: 'pursekeeper.dev' });
+}
+async function processBlock(req, res) {
+  if (overFreeLimit(req, checkHits, 60)) return send(res, 429, { error: 'limit is 60 checks per minute per IP' });
+  countCheck('process', req);
+  let body;
+  try { body = JSON.parse((await readBody(req, 20_000)).toString('utf8') || '{}'); } catch { return send(res, 400, { error: 'body must be JSON {block, subtype?}' }); }
+  const block = body.block && typeof body.block === 'object' ? body.block : body;
+  const need = ['type', 'account', 'previous', 'representative', 'balance', 'link', 'signature', 'work'];
+  const missing = need.filter(k => block[k] == null || block[k] === '');
+  if (missing.length) return send(res, 400, { error: 'block is missing ' + missing.join(', ') + ' (a signed state block with work)' });
+  if (block.type !== 'state') return send(res, 400, { error: 'only state blocks' });
+  const sub = ['send', 'receive', 'open', 'change', 'epoch'].includes(body.subtype) ? body.subtype : undefined;
+  const r = await rpc({ action: 'process', json_block: 'true', ...(sub ? { subtype: sub } : {}), block });
+  if (r.error) return send(res, 400, { ok: false, error: 'node: ' + r.error, hint: 'common causes: wrong previous (use /v1/account_info frontier), balance not exact, work below threshold ' + x402.WORK_THRESHOLD + ' for previous (or the account public key for an open), signature over the wrong fields' });
+  return send(res, 200, { ok: true, hash: r.hash, subtype: sub, note: 'broadcast; check confirmation with /v1/verify?hash=' + r.hash, node: 'pursekeeper.dev' });
 }
 
 async function charge(req, res) {
@@ -368,6 +401,13 @@ Endpoints
                               (free, 60/min per IP; for sellers who take Nano and have no node)
   GET  /v1/receivable?account=A&min_raw=N
                               confirmed, unpocketed sends to A with amounts and senders (free, 60/min)
+  GET  /v1/account_info?account=A
+                              frontier, balance, representative, confirmation height (free, 60/min);
+                              found:false with the open-block rule if the account has no blocks
+  POST /v1/process {"block":{...state block...},"subtype":"send|receive|open|change"}
+                              broadcast a signed state block through this node (free, 60/min).
+                              With /v1/work, /v1/receivable and /v1/verify this is enough to
+                              pocket and spend from a seed with no node: /examples/no-node.md
   POST /v1/work  {"hash":H}   work_generate at the send threshold for any hash: 3 per minute
                               per IP free (CPU, seconds); with X-Nano-Payment credit or an x402
                               payment header, ${nano(PRICE_RAW)} NANO per work, GPU, about a
@@ -419,6 +459,8 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/v1/work' && req.method === 'POST') return workGenerate(req, res);
     if (u.pathname === '/v1/verify') return verifyBlock(req, res, u);
     if (u.pathname === '/v1/receivable') return receivable(req, res, u);
+    if (u.pathname === '/v1/account_info') return accountInfo(req, res, u);
+    if (u.pathname === '/v1/process' && req.method === 'POST') return processBlock(req, res);
     if (u.pathname === '/v1/credit') {
       const c = await creditFor(u.searchParams.get('hash') || '');
       return send(res, c.error ? 400 : 200, c.error ? { error: c.error } : { remaining_raw: c.remaining.toString(), remaining_nano: nano(c.remaining) });
