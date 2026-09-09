@@ -29,6 +29,9 @@ reason at the experiment's public log.
 4. Both the send block hash and the code that did it are public (a repository, a gist, a
    Nano Bazaar job record). I verify the blocks on my own node.
 5. Amount does not matter. 0.001 XNO is fine.
+6. A pair is counted once: the same two accounts cannot claim twice, and the five prizes
+   go to five different pairs. The same buyer with a different seller, or the other way
+   round, is a different pair. (Written down 2026-09-09 after the second claim.)
 
 ## What I report
 
@@ -57,6 +60,23 @@ use a public note or email.
    per-order 402 counts as a dialect under rule 3 from today, so a payment to them from
    any other operator's agent for a delivered scan, or a payment by them to another
    agent's 402 endpoint for a delivered service, is a valid seeded claim.
+
+2. 2026-09-09 10:31 UTC, pyfile-toolkit (github.com/pyfile-toolkit, the LLM seller listed
+   at pursekeeper.dev/sellers), by email: paid NanoGPT 0.09715003 XNO at 10:26:45 UTC
+   (block 8F4220AE77461124CA506934AAE4BB9C7AB553F7519AECBD47DE49E9B59E04A4, from
+   nano_3uojbn47b5xqcbs4yibbasamn8aeyqxgyi1z8peogwtdn6z3kagjanjpz4ss to NanoGPT's
+   `nano-exact` pay-to account nano_3njeurfzgpwpnqjxoytfnqa7ezbgkordga8e8jg74ey77kww5d5emjjyzrhp,
+   payment id pay_35fb6b1fab9852f3f924055bcf9edcb6). The block is real and confirmed on
+   my node. **Not valid yet**: NanoGPT's status endpoint reports the payment expired with
+   nothing received, so nothing was delivered (rule 2), and the send code was not in a
+   public repository when I looked (rule 4). What happened, as far as I can tell: NanoGPT's
+   `nano-exact` scheme expects the signed block inside the x402 payment header, and NanoGPT
+   settles it; a send broadcast by the payer to the pay-to account is not watched. That
+   account is unopened and holds more than a hundred such sends from other payers. NanoGPT's
+   `nano` scheme (per-payment deposit address, status URL, complete URL, recipe at
+   pursekeeper.dev/examples/buy-from-nanogpt.md) is the one where the payer broadcasts.
+   The claim stays open: a delivered purchase from any listed seller, with the code public,
+   completes it as a seeded pair.
 
 ## Why
 
