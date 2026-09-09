@@ -204,6 +204,22 @@ async function workGenerate(req, res) {
 // N raw to address A (/v1/verify), and which confirmed sends to A are still unpocketed
 // (/v1/receivable). Read-only against this node; 60 per minute per IP.
 const checkHits = new Map();
+// Persisted counters for the free checks, so third-party use of /v1/verify and
+// /v1/receivable survives restarts and can be cited at review. IPs are stored only as
+// short hashes, to count distinct callers without keeping addresses.
+const CHECKS_FILE = path.join(__dirname, 'data', 'checks.json');
+let checks = { verify: 0, receivable: 0, ips: {}, since: new Date().toISOString() };
+try { checks = { ...checks, ...JSON.parse(fs.readFileSync(CHECKS_FILE, 'utf8')) }; } catch {}
+function countCheck(kind, req) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const key = crypto.createHash('sha256').update(ip).digest('hex').slice(0, 12);
+  checks[kind] = (checks[kind] || 0) + 1;
+  checks.ips[key] = (checks.ips[key] || 0) + 1;
+  try { fs.writeFileSync(CHECKS_FILE, JSON.stringify(checks)); } catch {}
+}
+function checkStats() {
+  return { verify: checks.verify, receivable: checks.receivable, distinct_ips: Object.keys(checks.ips).length, since: checks.since };
+}
 function overFreeLimit(req, map, limit) {
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
   const now = Date.now();
@@ -224,6 +240,7 @@ function minRawOf(u) {
 }
 async function verifyBlock(req, res, u) {
   if (overFreeLimit(req, checkHits, 60)) return send(res, 429, { error: 'limit is 60 checks per minute per IP' });
+  countCheck('verify', req);
   const hash = String(u.searchParams.get('hash') || '').toUpperCase();
   if (!/^[0-9A-F]{64}$/.test(hash)) return send(res, 400, { error: 'hash must be 64 hex characters (a block hash)' });
   const to = u.searchParams.get('to');
@@ -245,6 +262,7 @@ async function verifyBlock(req, res, u) {
 }
 async function receivable(req, res, u) {
   if (overFreeLimit(req, checkHits, 60)) return send(res, 429, { error: 'limit is 60 checks per minute per IP' });
+  countCheck('receivable', req);
   const account = u.searchParams.get('account') || '';
   if (!nanocurrency.checkAddress(account)) return send(res, 400, { error: 'account must be a nano_ address' });
   let minRaw; try { minRaw = minRawOf(u); } catch (e) { return send(res, 400, { error: e.message }); }
@@ -388,7 +406,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, fs.readFileSync(f, 'utf8'), 'text/plain');
     }
     if (u.pathname === '/v1/price') return send(res, 200, { pay_to: ADDRESS, price_raw: PRICE_RAW.toString(), price_nano: nano(PRICE_RAW) });
-    if (u.pathname === '/v1/stats') return send(res, 200, { ...stats, credited_hashes: Object.keys(credits).length, x402_settled: x402Log.length,
+    if (u.pathname === '/v1/stats') return send(res, 200, { ...stats, checks: checkStats(), credited_hashes: Object.keys(credits).length, x402_settled: x402Log.length,
       x402_work_by_seller: x402Log.filter(e => e.work_by === 'seller').length, work: workStats, work_sources: { paid: [...PAID_WORK_URLS.map(workName), ...WORK_URLS.map(workName), 'node'], free: [...WORK_URLS.map(workName), 'node'] } });
     if (u.pathname === '/v1/x402') return send(res, 200, {
       x402Version: x402.X402_VERSION, accepts: [X402_REQ],
