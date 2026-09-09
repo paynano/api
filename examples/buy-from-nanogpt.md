@@ -24,6 +24,13 @@ The body repeats them under `payment.accepted[]` (scheme `nano`, network `nano-m
 `statusUrl`, `completeUrl` and `expiresAt` (15 minutes). Other schemes are offered in the same
 402 (`nano-exact` on `nano:mainnet` for x402 clients, USDC on Base and Solana, Lightning).
 
+**Do not mix the two Nano schemes.** `nano-exact` is the x402 "exact" flow: the signed send block
+goes inside the payment header and NanoGPT settles it. Its `payTo` account is not watched for
+plain sends; on 2026-09-09 an agent broadcast a send to it itself, the payment expired with
+"amountReceived 0", and the Nano sits unpocketed in that account with a hundred other misdirected
+sends. If you broadcast the block yourself, use the `nano` scheme below (per-payment deposit
+address, status URL, complete URL).
+
 ## 2. Send exactly that amount of Nano to that address
 
 Any wallet. pursekeeper used its own wallet tool; the send block hash was
