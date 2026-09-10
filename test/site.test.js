@@ -4,12 +4,12 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { counterpartyNumbers, nanoToRaw, COUNTERPARTY_MIN_RAW, COUNTERPARTY_MIN_NANO } = require('../site');
+const { counterpartyNumbers, reclassifyCold, redact, COLD, nanoToRaw, COUNTERPARTY_MIN_RAW, COUNTERPARTY_MIN_NANO } = require('../site');
 
 const A = 'nano_1oatxz8ha1j55m4wzkkgmpoyyn4gr9bgu9snnfyqc6toawb5ht5e8w4x6s9o';
 const B = 'nano_3gmd94aey5nxrntgjrznnbssh3s7htyubeq91x8qgjpbe8qk59xiarf1homu';
 const C = 'nano_1i3y944esngqw6wb6ia68dotj4yuqctch9kx8ct65twt8ewi4rdcfgax7ggf';
-const D = 'nano_16qcqjhqkgopyq6dtuoarwosma8z51asec4t5zki3eq78yiuz7i5kd7bdzyh';
+const D = 'nano_1coldcoldcoldcoldcoldcoldcoldcoldcoldcoldcoldcoldcoldcoldcd11';
 const row = (kind, counterparty, nano) => ({ kind, counterparty, amount_raw: nanoToRaw(nano).toString() });
 
 test('nanoToRaw is exact', () => {
@@ -47,4 +47,17 @@ test('our own addresses are excluded entirely', () => {
   assert.equal(n.external.counterparties, 0);
   assert.equal(n.external.nano, 0n);
   assert.equal(n.counterparties.both, 0);
+});
+
+test('a receipt from the cold-storage sender is a tranche, not inflow, and its address is scrubbed', () => {
+  const C = 'nano_1coldcoldcoldcoldcoldcoldcoldcoldcoldcoldcoldcoldcoldcoldcd11';
+  const B = 'nano_3njeurfz9c1gs3gu3ihsezjtbfwnbjdbf9rn3wbkq7o1t6t8ai7xhdmh4nhn';
+  const led = reclassifyCold([row('tranche', 'cold', '300'), row('payment_in', C, '250'), row('payment_in', B, '0.02')], new Set([C]));
+  assert.equal(led[1].kind, 'tranche'); assert.equal(led[1].counterparty, 'cold'); assert.match(led[1].reason, /cold storage/);
+  assert.equal(led[2].kind, 'payment_in');
+  const n = counterpartyNumbers(led, new Set(), nanoToRaw('0.01'));
+  assert.equal(n.external.counterparties, 1); assert.equal(n.external.nano, nanoToRaw('0.02'));
+  COLD.add(C);
+  assert.equal(redact('top-up from ' + C + ' arrived'), 'top-up from [cold storage] arrived');
+  COLD.delete(C);
 });

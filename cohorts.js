@@ -54,7 +54,7 @@ async function ourHistory(rpc) {
 // (kind = tranche, counterparty = "cold"); the sender behind each tranche block is
 // looked up on the chain so it can be excluded even if it ever shows up elsewhere.
 async function ownAddresses(ledger, rpc) {
-  const own = new Set([ADDRESS, ...(process.env.GAMBIT_OWN_ADDRESSES || '').split(',').map(s => s.trim()).filter(Boolean), ...ownFromFile()]);
+  const own = new Set([ADDRESS, ...(process.env.GAMBIT_OWN_ADDRESSES || '').split(',').map(s => s.trim()).filter(Boolean), ...ownFromFile(), ...(await site.coldSenders(ledger, rpc))]);
   for (const r of ledger) {
     if (r.kind !== 'tranche' || !r.block_hash) continue;
     try {

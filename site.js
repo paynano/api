@@ -54,6 +54,39 @@ function counterpartyNumbers(ledger, ownExtra = new Set(), minRaw = COUNTERPARTY
   return { external, counterparties };
 }
 
+// The funder's cold storage. Tranches are booked with counterparty "cold"; the account
+// that actually sent each tranche block is looked up on the chain once and remembered.
+// A receipt from that account that the worker booked as a plain payment_in (a top-up
+// nobody requested) is a tranche too: it is rendered as one, counted as one, and its
+// address is never printed. data/cold-addresses.json (box-only) is the backstop for a
+// cold account that has not sent a tranche block yet.
+const COLD = new Set();
+const coldByTranche = new Map();   // tranche receive block -> sender account
+function coldFromFile() {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'cold-addresses.json'), 'utf8')).addresses.map(a => a.address); } catch { return []; }
+}
+async function coldSenders(ledger, rpcFn) {
+  for (const a of coldFromFile()) COLD.add(a);
+  for (const r of ledger) {
+    if (r.kind !== 'tranche' || !r.block_hash) continue;
+    if (coldByTranche.has(r.block_hash)) { COLD.add(coldByTranche.get(r.block_hash)); continue; }
+    try {
+      const recv = await rpcFn({ action: 'block_info', json_block: 'true', hash: r.block_hash });
+      const link = recv.contents && recv.contents.link;
+      if (!link) continue;
+      const sendBlock = await rpcFn({ action: 'block_info', json_block: 'true', hash: link });
+      if (sendBlock.block_account) { coldByTranche.set(r.block_hash, sendBlock.block_account); COLD.add(sendBlock.block_account); }
+    } catch {}
+  }
+  return COLD;
+}
+// Pure: payment_in rows from a cold sender become tranche rows with counterparty "cold".
+function reclassifyCold(ledger, cold) {
+  return ledger.map(r => (r.kind === 'payment_in' && cold.has(r.counterparty))
+    ? { ...r, kind: 'tranche', counterparty: 'cold', reason: (r.reason || '') + ' (top-up from cold storage; booked by the worker as a receipt, shown as a tranche)' }
+    : r);
+}
+
 // --- data ---------------------------------------------------------------------
 
 let cache = { at: 0, data: null };
@@ -63,7 +96,8 @@ async function load() {
   try {
     const q = sql => db.prepare(sql).all();
     const initiatives = q('select * from initiatives order by id');
-    const ledger = q('select * from ledger order by id');
+    const rawLedger = q('select * from ledger order by id');
+    const ledger = reclassifyCold(rawLedger, await coldSenders(rawLedger, body => fetch(RPC, { method: 'POST', body: JSON.stringify(body) }).then(r => r.json())));
     const decisions = q('select id, ts, initiative_id, summary, rationale from decisions order by id desc');
     const requests = q('select * from requests order by id desc');
     const wakes = q('select id, started_at, ended_at, trigger, model, cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, summary from wakes order by id desc');
@@ -116,6 +150,7 @@ async function load() {
 const WITHHELD = '[withheld]';
 function redact(s) {
   if (typeof s !== 'string') return s;
+  for (const a of COLD) s = s.split(a).join('[cold storage]');
   return s
     .replace(/(Ӿ\s?|(?:Nano|XNO|total|Total|balance|cold|grant|budget)\s+|\b)(\d{1,3}(?:,\d{3})+|\d{4,})(\.\d+)?(\s?(?:XNO|nano|Nano)\b)?/g, (m, pre, num, frac, unit) => {
       const amount = pre !== '' || !!unit;
@@ -413,4 +448,4 @@ async function handle(req, res, u, send) {
   return false;
 }
 
-module.exports = { handle, page, redact, esc, xno, addr, hash, when, day, counterpartyNumbers, nanoToRaw, COUNTERPARTY_MIN_NANO, COUNTERPARTY_MIN_RAW, DB_PATH, RPC, ADDRESS, EXPLORER };
+module.exports = { handle, page, redact, esc, xno, addr, hash, when, day, counterpartyNumbers, reclassifyCold, coldSenders, COLD, nanoToRaw, COUNTERPARTY_MIN_NANO, COUNTERPARTY_MIN_RAW, DB_PATH, RPC, ADDRESS, EXPLORER };
