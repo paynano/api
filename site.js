@@ -130,12 +130,15 @@ async function load() {
     for (const r of ledger) if ((r.kind === 'payment_out' || r.kind === 'cost') && r.initiative_id)
       spent[r.initiative_id] = (spent[r.initiative_id] || 0n) + BigInt(r.amount_raw);
 
-    const R = (rows, fields) => rows.map(r => { const o = { ...r }; for (const f of fields) o[f] = redact(o[f]); return o; });
+    // Every string field of every published row goes through redact(), not just the prose
+    // ones: the worker now records the sender of a cold tranche in meta_json, and that
+    // address must never reach a public page.
+    const R = rows => rows.map(r => { const o = { ...r }; for (const f of Object.keys(o)) if (typeof o[f] === 'string') o[f] = redact(o[f]); return o; });
     cache = { at: Date.now(), data: { generated_at: new Date().toISOString(), address: ADDRESS,
       numbers: { hot, receivable, tranches, costs, sent, received, spent_total: sent.nano + costs, burn_30d: burn, external, counterparties },
-      initiatives: R(initiatives, ['hypothesis', 'who_pays', 'verdict', 'post_mortem']).map(i => ({ ...i, spent_raw: (spent[i.id] || 0n).toString() })),
-      ledger: R(ledger, ['reason']), decisions: R(decisions, ['summary', 'rationale']), requests: R(requests, ['body', 'resolution']),
-      wakes: R(wakes, ['summary']), reports: R(reports, ['body']) } };
+      initiatives: R(initiatives).map(i => ({ ...i, spent_raw: (spent[i.id] || 0n).toString() })),
+      ledger: R(ledger), decisions: R(decisions), requests: R(requests),
+      wakes: R(wakes), reports: R(reports) } };
     return cache.data;
   } finally { db.close(); }
 }

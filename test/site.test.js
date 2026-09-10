@@ -59,5 +59,7 @@ test('a receipt from the cold-storage sender is a tranche, not inflow, and its a
   assert.equal(n.external.counterparties, 1); assert.equal(n.external.nano, nanoToRaw('0.02'));
   COLD.add(C);
   assert.equal(redact('top-up from ' + C + ' arrived'), 'top-up from [cold storage] arrived');
+  // the worker records the tranche sender in meta_json; every string field is redacted
+  assert.equal(redact('{"corrected_from":"payment_in","from":"' + C + '"}'), '{"corrected_from":"payment_in","from":"[cold storage]"}');
   COLD.delete(C);
 });
