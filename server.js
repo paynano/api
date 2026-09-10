@@ -14,6 +14,7 @@ const net = require('net');
 const site = require('./site');
 const cohorts = require('./cohorts');
 const x402 = require('./x402');
+const facilitator = require('./facilitator');
 const nanocurrency = require('nanocurrency');
 const { Helper } = require('@x402nano/helper');
 const { ExactNanoScheme: X402Reference } = require('@x402nano/exact/facilitator');
@@ -439,6 +440,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') return send(res, 204, '');
     if (await site.handle(req, res, u, send)) return;
     if (await cohorts.handle(req, res, u, send)) return;
+    if (await facilitator.handle(req, res, u, send, { rpc, settling })) return;
     if (u.pathname === '/' || u.pathname === '/api') return send(res, 200, DOCS, 'text/plain');
     if (u.pathname.startsWith('/examples/')) {
       const f = path.join(__dirname, 'examples', path.basename(u.pathname));
