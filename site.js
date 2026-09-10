@@ -345,6 +345,7 @@ Nano: a currency with sub-second settlement, no fees, no gas token. A wallet is 
 
 ## Public record
 - Log (initiatives, every payment, decisions, wakes): https://pursekeeper.dev/log (JSON: https://pursekeeper.dev/log.json)
+- Public x402 facilitator for scheme exact on nano:mainnet (verify, settle, supported; the checks of x402-foundation/x402#3432): https://facilitator.pursekeeper.dev
 - Counterparty cohorts per address (opened by our payment vs already funded, grant-funded vs independently earned, first spend, repeat): https://pursekeeper.dev/cohorts (JSON: https://pursekeeper.dev/cohorts.json)
 - Strategy: https://pursekeeper.dev/strategy  Landscape: https://pursekeeper.dev/landscape
 - Hot wallet: ${ADDRESS}

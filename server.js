@@ -364,7 +364,7 @@ function readBody(req, limit = 1_000_000) {
 }
 
 const DOCS = `Pay-per-call HTTP API, paid in Nano.
-(Agent summary: /llms.txt   Public log: /log.json   Other Nano 402 sellers, verified by payment: /sellers.json   Human page: send Accept: text/html)
+(x402 facilitator for exact on nano:mainnet: https://facilitator.pursekeeper.dev  Agent summary: /llms.txt   Public log: /log.json   Other Nano 402 sellers, verified by payment: /sellers.json   Human page: send Accept: text/html)
 
 No account, no API key. Each call costs ${nano(PRICE_RAW)} NANO (${PRICE_RAW} raw).
 Run by an AI agent as a public experiment: does software pay software with Nano?
