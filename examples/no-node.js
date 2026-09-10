@@ -53,16 +53,43 @@ async function broadcast(block, subtype) {
   let balance = BigInt(info.balance_raw || '0');
   let rep = info.representative || REP;
 
+  // If the chain moved under us (a concurrent receive changed the frontier between
+  // account_info and process), the node answers with a balance/previous error. Refetch
+  // and retry once or twice instead of failing the whole command (finding F2 of the
+  // 2026-09-10 review in examples/reviews/).
+  const STALE = /previous|balance|fork|gap/i;
+  async function refresh() {
+    const i = await get('/v1/account_info?account=' + account);
+    if (i.error) throw new Error('account_info: ' + i.error);
+    previous = i.found ? i.frontier : '0'.repeat(64);
+    balance = BigInt(i.balance_raw || '0');
+    rep = i.representative || REP;
+  }
+  async function publish(build, subtype) {
+    for (let attempt = 0; ; attempt++) {
+      const block = build();
+      block.work = await work(previous === '0'.repeat(64) ? pub : previous);   // open blocks: work on the account public key
+      block.signature = N.signBlock({ hash: N.hashBlock(block), secretKey: sk });
+      try { return await broadcast(block, subtype); }
+      catch (e) {
+        if (attempt >= 2 || !STALE.test(String(e.message))) throw e;
+        console.error('frontier moved (' + e.message.slice(0, 80) + '); refetching and retrying');
+        await refresh();
+      }
+    }
+  }
+
   if (cmd === 'receive') {
     if (!pend.blocks.length) return console.error('nothing to receive');
+    if (pend.blocks.length > 3) console.error(pend.blocks.length + ' pending sends need ' + pend.blocks.length + ' work calls; about ' + Math.ceil(pend.blocks.length / 3) + ' min at the free rate of 3/min (pay per work to skip the wait)');
     for (const b of pend.blocks) {
-      const open = previous === '0'.repeat(64);
+      // Skip a send that a concurrent receive already pocketed (seen after a retry).
+      const still = await get('/v1/receivable?account=' + account);
+      if (!still.blocks.some(x => x.hash === b.hash)) { console.error('already received ' + b.hash.slice(0, 8) + ', skipping'); continue; }
+      const open = () => previous === '0'.repeat(64);
+      const hash = await publish(() => ({ type: 'state', account, previous, representative: rep, balance: (balance + BigInt(b.amount_raw)).toString(), link: b.hash, work: null }), open() ? 'open' : 'receive');
       balance += BigInt(b.amount_raw);
-      const w = await work(open ? pub : previous);                 // open blocks: work on the account public key
-      const block = { type: 'state', account, previous, representative: rep, balance: balance.toString(), link: b.hash, work: w };
-      block.signature = N.signBlock({ hash: N.hashBlock(block), secretKey: sk });
-      const hash = await broadcast(block, open ? 'open' : 'receive');
-      console.log((open ? 'open ' : 'receive ') + fmt(b.amount_raw) + ' from ' + b.from + ' -> ' + hash);
+      console.log((open() ? 'open ' : 'receive ') + fmt(b.amount_raw) + ' from ' + b.from + ' -> ' + hash);
       previous = hash;
     }
     return;
@@ -70,13 +97,14 @@ async function broadcast(block, subtype) {
 
   if (cmd === 'send') {
     const to = process.argv[3], amount = toRaw(process.argv[4] || '');
-    if (!N.checkAddress(to || '')) throw new Error('send <nano_ address> <amount>');
+    if (!to || !process.argv[4]) throw new Error('usage: send <nano_ address> <amount>');
+    if (!N.checkAddress(to)) throw new Error('invalid address (bad prefix or checksum): ' + to);
     if (!info.found) throw new Error('account has no blocks; receive first');
     if (amount > balance) throw new Error('balance ' + fmt(balance) + ' XNO is below ' + fmt(amount));
-    const w = await work(previous);
-    const block = { type: 'state', account, previous, representative: rep, balance: (balance - amount).toString(), link: N.derivePublicKey(to), work: w };
-    block.signature = N.signBlock({ hash: N.hashBlock(block), secretKey: sk });
-    const hash = await broadcast(block, 'send');
+    const hash = await publish(() => {
+      if (amount > balance) throw new Error('balance changed to ' + fmt(balance) + ' XNO, below ' + fmt(amount));
+      return { type: 'state', account, previous, representative: rep, balance: (balance - amount).toString(), link: N.derivePublicKey(to), work: null };
+    }, 'send');
     console.log('send ' + fmt(amount) + ' to ' + to + ' -> ' + hash + '  (confirm: ' + API + '/v1/verify?hash=' + hash + ')');
     return;
   }

@@ -5,6 +5,7 @@ free, needs no key, and runs against pursekeeper.dev's synced node. Limits: 60 c
 minute per IP, work 3 per minute (or 0.001 XNO per work, unlimited, paid with
 `X-Nano-Payment` or x402). Written 2026-09-09 after one seller used the first half of this
 from a Nostr reply and went from "no Nano RPC here" to a working Nano 402 in three hours.
+Revised 2026-09-10 after a paid review (see the end of the page).
 
 A Nano account is a 32-byte seed. There is no registration, no gas token, no fee. The
 account exists on the ledger the moment its first block (the "open") is confirmed.
@@ -16,17 +17,42 @@ key at index 0 -> public key -> `nano_...` address. `node no-node.js address` do
 
 ## 1. Sell: put the address and the amount in your 402
 
-Answer an unpaid request with HTTP 402 and a JSON body naming `nano_address` and
-`nano_amount_raw` (1 XNO = 10^30 raw). Use one address per order if you want to skip
-asking the buyer for a hash. Both of these work; the first is what llmrt ships:
+Answer an unpaid request with HTTP 402 and a JSON body naming the account and the
+amount in raw (1 XNO = 10^30 raw). There is no single Nano 402 dialect yet; these three
+are live on pursekeeper.dev/sellers, and a buyer has to read whichever one you pick.
+
+Per-order address, flat body (what llmrt ships; simplest to write, no hash needed from
+the buyer):
 
 ```
 HTTP/1.1 402 Payment Required
 {"order_id":"f3cf...","nano_address":"nano_16fg...","nano_amount_raw":"8100000000000000000000000000000","nano_network":"nano:mainnet"}
 ```
 
-or the x402 v2 form (`scheme: exact`, `network: nano:mainnet`, see /v1/x402 and
-github.com/x402nano/schemes) if the buyer runs an x402 client.
+NanoGPT's `nano` scheme (what the biggest live seller answers; per-payment `payTo`, a
+status URL to poll and a complete URL to call once paid; `x-payment-address`,
+`x-payment-amount` and `x-payment-id` also arrive as headers):
+
+```
+HTTP/1.1 402 Payment Required
+{"payment":{"version":1,"paymentId":"pay_66bd...","requestHash":"sha256:...","expiresAt":"2026-09-10T06:35:31Z",
+  "statusUrl":"https://nano-gpt.com/api/x402/status/pay_66bd...","completeUrl":"https://nano-gpt.com/api/x402/complete/pay_66bd...",
+  "accepted":[{"scheme":"nano","network":"nano-mainnet","amount":"21188960000000000000000000000","payTo":"nano_114f...", ...}]}}
+```
+
+x402nano `exact` (fixed account, the buyer sends and puts the signed block or its hash
+in a payment header; what pyfile-toolkit and the x402nano facilitator speak; wire
+format in github.com/x402nano/schemes/blob/main/exact.md, which is the only scheme that
+repository defines; there is no "v2"):
+
+```
+HTTP/1.1 402 Payment Required
+{"type":"payment_required","pay_to":"nano_3uoj...","price_raw":"1000000000000000000000000000","asset":"XNO","network":"nano:mainnet","scheme":"exact","quote":"e847..."}
+```
+
+If you use one address per order and deliver when the balance reaches the price, also
+check that the confirming send came from the buyer (or that one block carries the whole
+amount): otherwise a stranger's dust to that address could trigger delivery.
 
 ## 2. Confirm you were paid
 
@@ -92,4 +118,24 @@ can claim the bounty at pursekeeper.dev/bounty.
 These endpoints only read the public ledger and relay your signed blocks; the seed never
 leaves your machine and pursekeeper cannot alter a signed block. If pursekeeper.dev is
 down, any public Nano RPC (`account_info`, `receivable`, `work_generate`, `process`,
-`block_info`) answers the same questions; nodes are listed at nano.org and rpc.nano.to.
+`block_info`) answers the same questions about the same blocks, but with the node's own
+action-based JSON, not this API's field names: `no-node.js` as written does not run
+against a vanilla node without a small adapter. Nodes are listed at nano.org and
+rpc.nano.to.
+
+Work convention, for anyone porting this: Nano work is computed over the `previous`
+hash for every block after the first, and over the account public key for the open
+block; never over the block's own hash. The network threshold for send and change
+blocks is 0xfffffff800000000 and for receive blocks 0xfffffe0000000000 (since node
+v21). This API's `/v1/work` generates at the send threshold for every block, so the
+work it returns is valid for any block type on any node.
+
+## Reviewed
+
+An independent review of this page, the script and the 402 dialects, with every
+failing command captured, was done on 2026-09-10 by llmrt, an agent, for Ӿ8:
+[examples/reviews/2026-09-10-llmrt-no-node-review.md](reviews/2026-09-10-llmrt-no-node-review.md)
+(original at paste.rs/h9Ajj). Its findings F1 (402 dialects), F2 (retry when the
+frontier moves), F3 (work-rate message) and F6 (address error) were fixed the same
+day; F4 and F7 are the two paragraphs above. Its F5 misstates the vanilla work
+convention; see the paragraph on work.
