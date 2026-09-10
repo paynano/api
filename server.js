@@ -145,7 +145,7 @@ async function chargeX402(req, res, headerValue) {
   const d = x402.decodePayment(headerValue);
   if (d.error) return paymentRequired(res, 'x402: ' + d.error, req), false;
   const v = await x402.verify(d.payload, X402_REQ, {
-    accountInfo: account => rpc({ action: 'account_info', account, representative: 'true' }),
+    accountInfo: account => rpc({ action: 'account_info', account, representative: 'true', include_confirmed: 'true' }),
     seen: async h => (h in credits) || settling.has(h),
     reference: x402Reference,
     workGenerate: async hash => (await workFor(hash, { paid: true })).work   // a paying block earns its work

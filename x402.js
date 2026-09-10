@@ -16,7 +16,7 @@
 //     link_as_account string)
 //   - block.previous is the account's current frontier
 //   - account balance minus block.balance is exactly the required amount
-//   - the frontier is confirmed (confirmation_height_frontier == frontier)
+//   - the frontier is confirmed (confirmed_frontier or confirmation_height_frontier == frontier)
 //   - the block hash has not been settled or credited before
 // The reference verify() is still run as well when a helper is supplied, so a
 // block must satisfy both.
@@ -128,7 +128,13 @@ async function verify(payload, required, deps) {
     const frontier = up(info.frontier || '');
     if (!frontier) return fail('payer account has no frontier', payer);
     if (frontier !== block.previous) return fail('block.previous is not the account frontier (' + frontier + ')', payer);
-    if (info.confirmation_height_frontier && up(info.confirmation_height_frontier) !== frontier)
+    // Modern include_confirmed responses use confirmed_frontier; legacy nodes
+    // use confirmation_height_frontier. Require evidence instead of skipping
+    // this gate when metadata is missing, and reject contradictory fields.
+    const confirmed = [info.confirmed_frontier, info.confirmation_height_frontier].filter(v => v !== undefined);
+    if (!confirmed.length || confirmed.some(v => typeof v !== 'string' || !/^[0-9A-F]{64}$/i.test(v)))
+      return fail('account_info failed: missing or invalid confirmation frontier', payer);
+    if (confirmed.some(v => up(v) !== frontier))
       return fail('account frontier is not confirmed yet; retry shortly', payer);
     let diff;
     try { diff = BigInt(info.balance) - BigInt(block.balance); } catch { return fail('bad balance', payer); }

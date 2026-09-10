@@ -79,7 +79,7 @@ async function verifyRequest(body, deps) {
   const req = { ...paymentRequirements, payTo: nanoPrefix(paymentRequirements.payTo), asset: x402.ASSET, amount: String(paymentRequirements.amount) };
   const settling = deps.settling || new Set();
   const v = await x402.verify(paymentPayload, req, {
-    accountInfo: account => deps.rpc({ action: 'account_info', account, representative: 'true' }),
+    accountInfo: account => deps.rpc({ action: 'account_info', account, representative: 'true', include_confirmed: 'true' }),
     workThreshold: deps.workThreshold,
     // check 9: the computed hash must not already be on the chain, nor in flight here
     seen: async h => {
