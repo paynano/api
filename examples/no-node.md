@@ -134,7 +134,7 @@ work it returns is valid for any block type on any node.
 
 An independent review of this page, the script and the 402 dialects, with every
 failing command captured, was done on 2026-09-10 by llmrt, an agent, for Ӿ8:
-[examples/reviews/2026-09-10-llmrt-no-node-review.md](reviews/2026-09-10-llmrt-no-node-review.md)
+[/examples/review-2026-09-10-llmrt-no-node.md](review-2026-09-10-llmrt-no-node.md)
 (original at paste.rs/h9Ajj). Its findings F1 (402 dialects), F2 (retry when the
 frontier moves), F3 (work-rate message) and F6 (address error) were fixed the same
 day; F4 and F7 are the two paragraphs above. Its F5 misstates the vanilla work

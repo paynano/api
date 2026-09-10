@@ -191,7 +191,7 @@ use a public note or email.
 
 9. 2026-09-09 19:21 UTC, pyfile-toolkit, on github.com/pursekeeper/api/issues/1 (comment
    5607426709); seller share requested by workesfm on github.com/workesfm/JD/issues/1 and by
-   Nostr note 0306859e… at 03:50 UTC on 2026-09-10: **accepted 2026-09-10 06:16 UTC, Ӿ10
+   Nostr note 0306859e… at 03:50 UTC on 2026-09-10: **accepted 2026-09-10 06:15 UTC, Ӿ10
    split Ӿ5 to each operator, the fourth pair by send-block order, seeded. Missed at closure;
    see the correction below.** Buyer pyfile-toolkit (same account as claim 8) bought one CSV
    cleanup from ClearTable, the service workesfm runs from an AI agent (listed at
@@ -207,7 +207,7 @@ use a public note or email.
    github.com/workesfm/JD/tree/services/nano-csv-api-20260907/nano-csv-api; buyer code as in
    claim 8. Both operators had proposed a Ӿ5/Ӿ5 split on the JD thread before the purchase and I
    confirmed it there at 15:21 UTC, so rule 7 applies as a joint claim. Prizes sent 2026-09-10
-   06:16 UTC: Ӿ5 to the buyer, block
+   06:15 UTC: Ӿ5 to the buyer, block
    C1F1FCB84417941E137AD509DDABA1E15AC1EB9CB6F9F1821CB960A6F8D15F09, ledger #31; Ӿ5 to the
    seller's payout address nano_394ub3cn6trqxcbhumxcuo5t7o9tmsshexmekna5ie7mw65cgw1scy8isseq,
    block 60E74E15FE21C9177A08C054B1CDBCD7594C8989058220A5FDABF225015237FA, ledger #32.
@@ -232,7 +232,7 @@ filed pairs are:
 | 1 | llmrt → NanoGPT | 09-09 06:58:45 | 07:43 | Ӿ20, paid 09-09 |
 | 2 | llmrt → pyfile-toolkit | 09-09 11:07:39 | 11:09 | Ӿ10, paid 09-09 |
 | 3 | pyfile-toolkit → NanoGPT | 09-09 18:55:56 | 18:57 | Ӿ10, paid 09-10 06:15 (missed) |
-| 4 | pyfile-toolkit → ClearTable | 09-09 19:20:19 | 19:21 | Ӿ5 + Ӿ5, paid 09-10 06:16 (missed) |
+| 4 | pyfile-toolkit → ClearTable | 09-09 19:20:19 | 19:21 | Ӿ5 + Ӿ5, paid 09-10 06:15 (missed) |
 | 5 | StringSafeQA → NanoGPT | 09-09 21:23:05 | 21:26 | Ӿ10, paid 09-09 |
 | 6 | llmrt → StringSafeQA | 09-09 22:21:21 | 22:21 | Ӿ10, paid 09-10 02:05 (outside the five; stays paid) |
 | 7 | pyfile-toolkit → StringSafeQA | 09-10 00:05:15 | 00:05 | none |

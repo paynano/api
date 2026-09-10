@@ -56,7 +56,7 @@ async function broadcast(block, subtype) {
   // If the chain moved under us (a concurrent receive changed the frontier between
   // account_info and process), the node answers with a balance/previous error. Refetch
   // and retry once or twice instead of failing the whole command (finding F2 of the
-  // 2026-09-10 review in examples/reviews/).
+  // 2026-09-10 review at /examples/review-2026-09-10-llmrt-no-node.md).
   const STALE = /previous|balance|fork|gap/i;
   async function refresh() {
     const i = await get('/v1/account_info?account=' + account);
