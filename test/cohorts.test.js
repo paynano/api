@@ -16,6 +16,23 @@ const DAY = 86400;
 const blk = (o) => ({ type: 'state', local_timestamp: String(o.at), amount: String(o.amount ?? XNO / 10n), hash: o.hash, previous: o.previous || 'P', height: String(o.height || 1), subtype: o.subtype, account: o.account, link: o.link || 'L' });
 const cp = (address, extra = {}) => ({ address, ledger_out: [], ledger_in: [], reasons: [], initiative_ids: [], ...extra });
 
+test('a failed outbound-history lookup is unknown, not proof of no spending', async () => {
+  const grant = blk({ subtype: 'send', account: A, hash: 'GRANT', at: T0 });
+  const opened = blk({ subtype: 'receive', account: US, hash: 'OPEN', link: 'GRANT', previous: ZERO, at: T0 + 1 });
+  const ledger = [{ id: 1, kind: 'payment_out', counterparty: A, amount_raw: grant.amount, block_hash: 'GRANT' }];
+  const rpc = async body => {
+    if (body.action === 'account_history' && body.account === US) return { history: [grant] };
+    if (body.action === 'account_info') return { open_block: 'OPEN' };
+    if (body.action === 'account_history' && body.head) return { error: 'History unavailable' };
+    if (body.action === 'account_history') return { history: [opened] };
+    throw new Error('unexpected fixture RPC');
+  };
+  const result = await computeCohorts({ ledger, rpc });
+  assert.equal(result.rows[0].first_spend_status, 'unknown');
+  assert.match(result.rows[0].chain_error, /History unavailable/);
+  assert.equal(result.rows[0].paid_raw, grant.amount);
+});
+
 test('computeCohorts does not reintroduce a ledger refund from chain history', async () => {
   const refund = blk({ subtype: 'send', account: A, hash: 'REFUND', at: T0 });
   const ledger = [{ id: 1, kind: 'payment_out', counterparty: A, amount_raw: '1', block_hash: 'REFUND', meta_json: '{"refund":true}' }];
