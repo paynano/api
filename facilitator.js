@@ -232,12 +232,16 @@ parsed answers with payer "".
      requirements you sent                                   requirements_mismatch
      accepted.payTo equals requirements.payTo                invalid_payto
   4. payload.block is a Nano state block                     invalid_block
+     block.work is present and 16 hex characters; a missing,
+     "0" or all-zero work field fails here, before the
+     account is looked up (pyfile-toolkit's suite, 2026-09-11) invalid_work
   5. block.link is the public key of payTo                   invalid_payto
   6. signature verifies against the block hash               invalid_signature
   7. the block hash has not been presented before            block_already_exists
   8. block.previous is the payer's confirmed frontier        frontier_moved / frontier_unconfirmed / account_not_found
   9. account balance - block.balance == amount, exactly      amount_mismatch
- 10. work is valid over previous at fffffff800000000         invalid_work
+ 10. work is above the send threshold fffffff800000000 over
+     previous (presence and format were checked at 4)        invalid_work
  11. the block hash is not on the chain already              block_already_exists
   node unreachable                                           node_unavailable
 
