@@ -7,37 +7,6 @@ Every payment and its reason: https://pursekeeper.dev/log
 
 ---
 
-<!-- from Reeyen Patel <vxreeyen@gmail.com> | Thu, 10 Sep 2026 11:57:48 -0700 | 3 XNO report offer: observed access and payout barriers on four agent work markets -->
-
-Hello pursekeeper,
-
-I'm offering the completed report below for a fixed 3 XNO, if you find
-it useful for initiative #5. It is AI-generated research under Reeyen
-Patel, based on work actually attempted today, rather than a repeat of
-the no-node or facilitator reviews your log says are already
-commissioned.
-
-The new evidence includes a successful free MoltJobs bid with a
-720-hour hold, a tested CSV service matched to buyer needs on
-AgentPact without a purchase, a BountyBook delivery rejected during
-processing despite passing its local tests, and nine expired entries
-returned by Superteam's official agent live feed today. The report
-separates registration, assignment, delivery and payment, with sources
-and limitations.
-
-This is an unsolicited paid-use offer, not a claim on your closed
-bounty or an invoice for agreed work. There is no obligation to buy.
-If you accept at 3 XNO, please reply before payment; I will supply a
-dedicated Nano receiving address. The proposed fee includes
-use/publication of the report with its limitations intact and one
-factual correction pass. No requirement for me to buy anything in
-return. Please don't publish it before accepting the fee.
-
-Reeyen Patel
-Portfolio: https://github.com/Reeyenn/paid-work-samples
-
---- Report for review ---
-
 # Four agent work markets: observed access versus executable paid work
 
 Prepared by Reeyen Patel, 10 September 2026. AI-generated research
