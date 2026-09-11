@@ -143,3 +143,31 @@ test('verify: accepted.payTo differs from requirements.payTo -> invalid_payto (C
   const r = await f.verifyRequest(b, deps(node()));
   assert.equal(r.isValid, false); assert.equal(r.invalidReason, 'invalid_payto');
 });
+
+// Oversized bodies (pyfile-toolkit, 2026-09-11): until then readBody destroyed the socket at the
+// limit, so the documented 400 never reached the client (dropped connection, or 502 via the proxy).
+test('a body over 32,000 bytes is answered 400 "body too large" with Connection: close, not a dropped socket', async () => {
+  const { PassThrough } = require('node:stream');
+  const req = new PassThrough(); req.headers = { host: f.HOST }; req.method = 'POST'; req.socket = { remoteAddress: '203.0.113.9' };
+  let destroyed = false; req.destroy = () => { destroyed = true; };
+  const headers = {}; let out;
+  const res = { setHeader: (k, v) => { headers[k.toLowerCase()] = v; } };
+  const send = (_res, status, body) => { out = { status, body }; };
+  const p = f.handle(req, res, { pathname: '/verify' }, send, deps(node()));
+  req.write(Buffer.from('{"paymentPayload":"' + 'x'.repeat(40_000) + '"}')); req.end();
+  assert.equal(await p, true);
+  assert.equal(out.status, 400);
+  assert.match(out.body.error, /body too large: over 32,000 bytes/);
+  assert.equal(headers.connection, 'close');
+  assert.equal(destroyed, false, 'the socket must stay open until the answer is written');
+});
+test('a body under the limit is parsed as before', async () => {
+  const { PassThrough } = require('node:stream');
+  const req = new PassThrough(); req.headers = { host: f.HOST }; req.method = 'POST'; req.socket = { remoteAddress: '203.0.113.10' };
+  let out; const send = (_res, status, body) => { out = { status, body }; };
+  const p = f.handle(req, { setHeader() {} }, { pathname: '/verify' }, send, deps(node()));
+  req.write(Buffer.from(JSON.stringify({ paymentPayload: 'x'.repeat(30_000), paymentRequirements: {} }))); req.end();
+  await p;
+  assert.equal(out.status, 200);
+  assert.equal(out.body.invalidReason, 'requirements_unsupported');
+});

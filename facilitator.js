@@ -140,12 +140,20 @@ function publicStats() {
   return { ...rest, distinct_ips: Object.keys(ips).length, settled_count: settled.length, settled_last_20: settled.slice(-20) };
 }
 
+// Over the limit: reject at once (the caller answers 400 with Connection: close) and keep draining
+// the rest of the request so the answer can be written; only a body ten times over the limit
+// gets the socket destroyed. Destroying it at the limit (until 2026-09-11) meant the 400 never
+// left the box: the client saw a dropped connection or, through the proxy, a 502 (pyfile-toolkit).
 function readBody(req, limit = 32_000) {
   return new Promise((resolve, reject) => {
-    const chunks = []; let n = 0;
-    req.on('data', c => { n += c.length; if (n > limit) { reject(new Error('body too large')); req.destroy(); } else chunks.push(c); });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
+    const chunks = []; let n = 0, over = false;
+    req.on('data', c => {
+      n += c.length;
+      if (over) { if (n > limit * 10) req.destroy(); return; }
+      if (n > limit) { over = true; chunks.length = 0; reject(Object.assign(new Error('body too large: over ' + limit.toLocaleString('en-US') + ' bytes'), { tooLarge: true })); } else chunks.push(c);
+    });
+    req.on('end', () => { if (!over) resolve(Buffer.concat(chunks)); });
+    req.on('error', e => { if (!over) reject(e); });
   });
 }
 
@@ -164,7 +172,7 @@ async function handle(req, res, u, send, deps) {
     if (req.method !== 'POST') return send(res, 405, { error: 'POST a JSON body {x402Version, paymentPayload, paymentRequirements}' }), true;
     if (overLimit(req, kind)) return send(res, 429, { error: LIMITS[kind] + ' ' + kind + ' calls per minute per IP' }), true;
     let body;
-    try { body = JSON.parse((await readBody(req)).toString('utf8') || '{}'); } catch (e) { return send(res, 400, { error: 'body must be JSON: ' + e.message }), true; }
+    try { body = JSON.parse((await readBody(req)).toString('utf8') || '{}'); } catch (e) { if (e.tooLarge) res.setHeader('Connection', 'close'); return send(res, 400, { error: e.tooLarge ? e.message : 'body must be JSON: ' + e.message }), true; }
     if (!body.paymentPayload || !body.paymentRequirements) return send(res, 400, { error: 'paymentPayload and paymentRequirements are required' }), true;
     countIp(req); stats[kind]++;
     const strip = o => { const r = {}; for (const k of Object.keys(o)) if (!k.startsWith('_')) r[k] = o[k]; return r; };
@@ -247,20 +255,25 @@ parsed answers with payer "".
 
 Envelope errors, outside the isValid/invalidReason shape:
   405 {"error":...}   anything but POST on /verify or /settle
-  400 {"error":...}   body is not JSON, is over 32 KB, or lacks paymentPayload or paymentRequirements
+  400 {"error":...}   body is not JSON, is over 32,000 bytes ("body too large", connection then closed), or lacks paymentPayload or paymentRequirements
   429 {"error":...}   over the per-IP limit below
 
 /settle runs the same checks, broadcasts the block (process, subtype send), waits 0.5 s and
-polls block_info once a second until confirmed == "true" or maxTimeoutSeconds (capped at
-${MAX_POLL_S}). A processed-but-unconfirmed block answers confirmation_timeout with the hash;
-check block_info before retrying, because a retry of the same block answers
-block_already_exists.
+polls block_info once a second until confirmed == "true" or the poll budget runs out.
+maxTimeoutSeconds (default 60, capped at ${MAX_POLL_S}) is that budget, best effort, counted from
+the moment process returns; it is not an HTTP deadline. A poll may start up to a second
+after the budget ends and is allowed to finish, and a confirmation seen on it is answered
+success, so the response can arrive about 1.5 s plus one node round trip after the budget,
+on top of the time process itself took. Set the HTTP timeout above that. A
+processed-but-unconfirmed block answers confirmation_timeout with the hash; after that, or
+after a client-side timeout, check block_info before retrying, because a retry of the same
+block answers block_already_exists.
 
 Clients: on frontier_moved, refetch account_info, re-sign with the new previous and
 balance, and re-present. A signed send block has no expiry; to withdraw an unsettled one,
 publish any block on your own account.
 
-Limits: ${LIMITS.verify} /verify and ${LIMITS.settle} /settle calls per minute per IP, 32 KB bodies. No
+Limits: ${LIMITS.verify} /verify and ${LIMITS.settle} /settle calls per minute per IP, 32,000-byte bodies. No
 uptime promise beyond "an agent restarts it when it notices". If you rely on it, say so at
 agent@pursekeeper.dev or on github.com/pursekeeper/api and it gets a review date.
 

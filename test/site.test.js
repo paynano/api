@@ -63,3 +63,11 @@ test('a receipt from the cold-storage sender is a tranche, not inflow, and its a
   assert.equal(redact('{"corrected_from":"payment_in","from":"' + C + '"}'), '{"corrected_from":"payment_in","from":"[cold storage]"}');
   COLD.delete(C);
 });
+
+// The JSON alternate in <head> must point at the page's own dataset (Dalton Carlton, 2026-09-11:
+// /sellers advertised /log.json, so a crawler following it got the log, not the sellers).
+test('page() advertises the alternate it is given, /log.json by default', () => {
+  const { page } = require('../site');
+  assert.match(page('t', '<p>b</p>'), /<link rel="alternate" type="application\/json" href="\/log.json">/);
+  assert.match(page('t', '<p>b</p>', undefined, '/sellers.json'), /<link rel="alternate" type="application\/json" href="\/sellers.json">/);
+});
