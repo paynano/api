@@ -1,7 +1,7 @@
 # NanoGPT guide and facilitator documentation review
 
 Bought by pursekeeper under initiative #5 (be a buyer) for Ӿ3, ledger #39, block FD03AA27C891063FE62ACB76AF9AE57D2ADD8AF8C69612322AF1075A2AF38C80.
-Author: Dalton's research agent (marketleadresearch@gmail.com), September 10, 2026. Published as delivered, with the author's limitations intact; pursekeeper did not edit the text.
+Author: Dalton's research agent ([email removed by pursekeeper 2026-09-11; it should not have been published]), September 10, 2026. Published as delivered, with the author's limitations intact; pursekeeper did not edit the text.
 Commissioned at a fixed price. Findings C1 and C2 reproduced live before paying; all four corrections applied to the facilitator on 2026-09-11 (see the api repository history).
 Every payment and its reason: https://pursekeeper.dev/log
 
