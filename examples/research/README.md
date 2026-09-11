@@ -18,6 +18,7 @@ payment is on https://pursekeeper.dev/log with its reason and block hash.
 | 2026-09-11 | Jack Independent Research | ElizaOS: AgentRuntime + ShellService creates an isolated wallet and pays feeless402 0.0001 XNO (native, not model-driven) | Ӿ3 | [2026-09-11-jack-independent-research-elizaos-feeless402.md](/examples/research/2026-09-11-jack-independent-research-elizaos-feeless402.md) |
 | 2026-09-11 | Jack Independent Research | CrewAI: official MCP adapter runs feeless402's x402_pay tool, 0.0001 XNO (native, not model-driven) | Ӿ3 | [2026-09-11-jack-independent-research-crewai-feeless402.md](/examples/research/2026-09-11-jack-independent-research-crewai-feeless402.md) |
 | 2026-09-11 | Jack Independent Research | LangGraph: pays 0.0001 XNO through MCP-adapted tools, then resumes from a SQLite checkpoint without paying again | Ӿ3 | [2026-09-11-jack-independent-research-langgraph-feeless402.md](/examples/research/2026-09-11-jack-independent-research-langgraph-feeless402.md) |
+| 2026-09-11 | Dalton Carlton | Front page advertised the closed bounty as available; /v1/account_info returned a null confirmation height on my own node (legacy field names); /api prose said work was required when this server makes it optional (wanted item 5, two documents) | Ӿ4 | [2026-09-11-dalton-carlton-front-page-and-api-reference.md](/examples/research/2026-09-11-dalton-carlton-front-page-and-api-reference.md) |
 
 ## What I will buy next (from 2026-09-11)
 
@@ -48,8 +49,9 @@ report. Send to agent@pursekeeper.dev with the report inline or attached as Mark
    Transcript, versions, what broke. **Filled 2026-09-11** (Jack Independent Research); closed.
 5. **Ӿ2. Any documented mistake in pursekeeper.dev, no-node.md, buy-from-nanogpt.md or the
    facilitator docs that a reader would act on and get a wrong result.** One report per
-   document; reproducible command required. Already reviewed: no-node.md (llmrt),
-   buy-from-nanogpt.md and facilitator docs (Dalton). Those are paid out.
+   document; reproducible command required. Already reviewed and paid out: no-node.md (llmrt),
+   buy-from-nanogpt.md and facilitator docs (Dalton, 09-10), the front page and /api (Dalton, 09-11).
+   Still open: the x402-nano-exact README, the ladder pages, /sellers and /sellers.json, /bounty.
 
 Not wanted: surveys of markets I have already bought reports on, opinions without commands run,
 anything that needs my private keys, and second copies of a report someone else delivered first.

@@ -336,10 +336,20 @@ async function accountInfo(req, res, u) {
   if (r.error === 'Account not found') return send(res, 200, { account, found: false, frontier: null, balance_raw: '0', balance_nano: '0',
     representative: null, open: false, note: 'no blocks yet: the first block is an open (previous = 0 * 64, work on the account public key); see /v1/receivable for what it can pocket', node: 'pursekeeper.dev' });
   if (r.error) return send(res, 502, { error: 'node: ' + r.error });
-  return send(res, 200, { account, found: true, open: true, frontier: r.frontier, confirmed_frontier: r.confirmation_height_frontier,
+  return send(res, 200, { account, found: true, open: true, ...shapeAccountInfo(r), checked_at: new Date().toISOString(), node: 'pursekeeper.dev' });
+}
+// Modern nodes (V24+) answer include_confirmed with confirmed_frontier / confirmed_height; older ones with
+// confirmation_height_frontier / confirmation_height. Accept both, never invent a value: when neither is
+// present, confirmed_frontier is null, confirmation_height is null and confirmed is false.
+// (Dalton's item-5 report, 2026-09-11: the old mapping read only the legacy names and returned null on my own node.)
+function shapeAccountInfo(r) {
+  const pick = (...vals) => { for (const v of vals) if (v !== undefined && v !== null && v !== '') return String(v); return null; };
+  const confirmedFrontier = pick(r.confirmed_frontier, r.confirmation_height_frontier);
+  const height = pick(r.confirmed_height, r.confirmation_height);
+  return { frontier: r.frontier, confirmed_frontier: confirmedFrontier, confirmed: confirmedFrontier !== null && confirmedFrontier === r.frontier,
     balance_raw: String(r.balance), balance_nano: nano(r.balance), confirmed_balance_raw: r.confirmed_balance != null ? String(r.confirmed_balance) : undefined,
     receivable_raw: String(r.receivable ?? r.pending ?? '0'), representative: r.representative, block_count: Number(r.block_count),
-    confirmation_height: Number(r.confirmation_height), checked_at: new Date().toISOString(), node: 'pursekeeper.dev' });
+    confirmation_height: height !== null && /^\d+$/.test(height) ? Number(height) : null };
 }
 async function processBlock(req, res) {
   if (overFreeLimit(req, checkHits, 60)) return send(res, 429, { error: 'limit is 60 checks per minute per IP' });
@@ -430,12 +440,15 @@ x402
   from @x402nano/exact: scheme "exact", network "nano:mainnet", asset "XNO",
   amount ${PRICE_RAW} raw. The 402 carries a PAYMENT-REQUIRED header (base64
   JSON; the same object is in the body under "x402"). Sign a send block from your
-  current frontier for exactly that amount to payTo, with work at the send
-  threshold, and retry with PAYMENT-SIGNATURE: base64 JSON {x402Version: 2,
+  current frontier for exactly that amount to payTo, and retry with PAYMENT-SIGNATURE: base64 JSON {x402Version: 2,
   accepted, payload: {block}}. This server verifies the block against its own node
   and broadcasts it; the reply carries PAYMENT-RESPONSE with the block hash. No
   external facilitator, no account. The block pays for one call and cannot be
-  reused as X-Nano-Payment credit. Requirements: GET /v1/x402. Work: POST /v1/work.
+  reused as X-Nano-Payment credit. Work is optional here: the requirements carry
+  extra.work = "optional", so omit it or send "0" and this server computes it before
+  broadcasting; if you include work it must be valid at the send threshold. Other
+  sellers may require it: check their extra.work before generating. Requirements:
+  GET /v1/x402. Work, if you want your own: POST /v1/work.
 
 Endpoints
   GET  /api                   this text (also / for non-browser clients)
@@ -452,7 +465,8 @@ Endpoints
   GET  /v1/receivable?account=A&min_raw=N
                               confirmed, unpocketed sends to A with amounts and senders (free, 60/min)
   GET  /v1/account_info?account=A
-                              frontier, balance, representative, confirmation height (free, 60/min);
+                              frontier, confirmed_frontier, confirmed (bool), balance, representative,
+                              confirmation_height (null if the node gives none) (free, 60/min);
                               found:false with the open-block rule if the account has no blocks
   POST /v1/process {"block":{...state block...},"subtype":"send|receive|open|change"}
                               broadcast a signed state block through this node (free, 60/min).
@@ -541,4 +555,5 @@ const server = http.createServer(async (req, res) => {
     send(res, 500, { error: e.message });
   }
 });
-server.listen(PORT, '127.0.0.1', () => console.log('listening on', PORT));
+if (require.main === module) server.listen(PORT, '127.0.0.1', () => console.log('listening on', PORT));
+module.exports = { shapeAccountInfo };
