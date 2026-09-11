@@ -77,10 +77,12 @@ const nanoPrefix = a => String(a).replace(/^xrb_/, 'nano_');
 async function verify(payload, required, deps) {
   const fail = (reason, payer = '') => ({ ok: false, reason, payer });
   try {
+    // version first, before the schema, so a v1 envelope gets the documented code rather than a schema failure
+    if (!payload || typeof payload !== 'object') return fail('payload does not match x402 v2 PaymentPayload schema');
+    if (payload.x402Version !== X402_VERSION) return fail('x402Version must be 2 (got ' + JSON.stringify(payload.x402Version) + ')');
     const parsed = parsePaymentPayload(payload);
     if (!parsed.success) return fail('payload does not match x402 v2 PaymentPayload schema');
     const p = parsed.data;
-    if (p.x402Version !== X402_VERSION) return fail('x402Version must be 2');
 
     // (a) the client accepted exactly what we asked for
     const a = p.accepted;

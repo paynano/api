@@ -443,8 +443,11 @@ const server = http.createServer(async (req, res) => {
     if (await facilitator.handle(req, res, u, send, { rpc, settling })) return;
     if (u.pathname === '/' || u.pathname === '/api') return send(res, 200, DOCS, 'text/plain');
     if (u.pathname.startsWith('/examples/')) {
-      const f = path.join(__dirname, 'examples', path.basename(u.pathname));
-      if (!fs.existsSync(f)) return send(res, 404, { error: 'no such example' });
+      const root = path.join(__dirname, 'examples');
+      let f = path.resolve(root, '.' + path.posix.normalize('/' + decodeURIComponent(u.pathname.slice('/examples/'.length))));
+      if (f !== root && !f.startsWith(root + path.sep)) return send(res, 404, { error: 'no such example' });
+      if (fs.existsSync(f) && fs.statSync(f).isDirectory()) f = path.join(f, 'README.md');
+      if (!fs.existsSync(f) || !fs.statSync(f).isFile()) return send(res, 404, { error: 'no such example' });
       return send(res, 200, fs.readFileSync(f, 'utf8'), 'text/plain');
     }
     if (u.pathname === '/v1/price') return send(res, 200, { pay_to: ADDRESS, price_raw: PRICE_RAW.toString(), price_nano: nano(PRICE_RAW) });

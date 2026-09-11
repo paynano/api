@@ -216,20 +216,35 @@ paymentRequirements must be {"scheme":"exact","network":"nano:mainnet","asset":"
 paymentPayload is the x402 v2 PaymentPayload with payload.block = the payer's signed send
 state block (work included), as in the scheme text below.
 
-What /verify checks, in order (the nine checks of the scheme proposal
-x402-foundation/x402#3432, specs/schemes/exact/scheme_exact_nano.md, plus two):
+What /verify checks. The first failing check names the code; the list is the order the
+implementation runs them (the nine checks of the scheme proposal x402-foundation/x402#3432,
+specs/schemes/exact/scheme_exact_nano.md, plus two). Anything that stops before a block is
+parsed answers with payer "".
 
-  1. x402Version is 2                                     unsupported_x402_version
-  2. accepted.{scheme,network,payTo,amount,asset} equal
-     the requirements you sent                            requirements_mismatch
-  3. payload.block is a Nano state block                  invalid_block
-  4. signature verifies against the block hash            invalid_signature
-  5. block.link is the public key of payTo               invalid_payto
-  6. block.previous is the payer's confirmed frontier     frontier_moved / frontier_unconfirmed / account_not_found
-  7. account balance - block.balance == amount, exactly   amount_mismatch
-  8. work is valid over previous at fffffff800000000      invalid_work
-  9. the block hash is not on the chain already           block_already_exists
-  node unreachable                                        node_unavailable
+  0. paymentRequirements are ones this facilitator serves:
+     scheme exact, network nano:mainnet, asset XNO,
+     a valid nano_ payTo, amount a positive raw integer      requirements_unsupported
+  1. paymentPayload.x402Version is 2 (checked before the
+     schema, so a v1 envelope gets this code)               unsupported_x402_version
+  2. paymentPayload matches the x402 v2 PaymentPayload
+     schema                                                  invalid_block
+  3. accepted.{scheme,network,amount,asset} equal the
+     requirements you sent                                   requirements_mismatch
+     accepted.payTo equals requirements.payTo                invalid_payto
+  4. payload.block is a Nano state block                     invalid_block
+  5. block.link is the public key of payTo                   invalid_payto
+  6. signature verifies against the block hash               invalid_signature
+  7. the block hash has not been presented before            block_already_exists
+  8. block.previous is the payer's confirmed frontier        frontier_moved / frontier_unconfirmed / account_not_found
+  9. account balance - block.balance == amount, exactly      amount_mismatch
+ 10. work is valid over previous at fffffff800000000         invalid_work
+ 11. the block hash is not on the chain already              block_already_exists
+  node unreachable                                           node_unavailable
+
+Envelope errors, outside the isValid/invalidReason shape:
+  405 {"error":...}   anything but POST on /verify or /settle
+  400 {"error":...}   body is not JSON, is over 32 KB, or lacks paymentPayload or paymentRequirements
+  429 {"error":...}   over the per-IP limit below
 
 /settle runs the same checks, broadcasts the block (process, subtype send), waits 0.5 s and
 polls block_info once a second until confirmed == "true" or maxTimeoutSeconds (capped at

@@ -129,3 +129,17 @@ test('settle: an in-flight hash is refused while settling', async () => {
   const r = await f.verifyRequest(body(b), deps(node(), { settling }));
   assert.equal(r.invalidReason, 'block_already_exists');
 });
+
+// Dalton's docs QA, 2026-09-10: C1 and C2 (research/2026-09-10-dalton-nanogpt-guide-and-facilitator-docs-qa.md)
+test('verify: a v1 envelope -> unsupported_x402_version, not invalid_block (C1)', async () => {
+  const b = body(makeBlock()); b.paymentPayload.x402Version = 1;
+  const r = await f.verifyRequest(b, deps(node()));
+  assert.equal(r.isValid, false); assert.equal(r.invalidReason, 'unsupported_x402_version'); assert.equal(r.payer, '');
+});
+
+test('verify: accepted.payTo differs from requirements.payTo -> invalid_payto (C2, documented as such)', async () => {
+  const other = { ...REQ, payTo: 'nano_3njeurfzgpwpnqjxoytfnqa7ezbgkordga8e8jg74ey77kww5d5emjjyzrhp' };
+  const b = body(makeBlock()); b.paymentPayload.accepted = other;
+  const r = await f.verifyRequest(b, deps(node()));
+  assert.equal(r.isValid, false); assert.equal(r.invalidReason, 'invalid_payto');
+});
