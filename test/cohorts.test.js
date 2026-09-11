@@ -16,6 +16,43 @@ const DAY = 86400;
 const blk = (o) => ({ type: 'state', local_timestamp: String(o.at), amount: String(o.amount ?? XNO / 10n), hash: o.hash, previous: o.previous || 'P', height: String(o.height || 1), subtype: o.subtype, account: o.account, link: o.link || 'L' });
 const cp = (address, extra = {}) => ({ address, ledger_out: [], ledger_in: [], reasons: [], initiative_ids: [], ...extra });
 
+test('computeCohorts does not reintroduce a ledger refund from chain history', async () => {
+  const refund = blk({ subtype: 'send', account: A, hash: 'REFUND', at: T0 });
+  const ledger = [{ id: 1, kind: 'payment_out', counterparty: A, amount_raw: '1', block_hash: 'REFUND', meta_json: '{"refund":true}' }];
+  const rpc = async body => {
+    if (body.action === 'account_history' && body.account === US) return { history: [refund] };
+    if (body.action === 'account_info') return { error: 'Account not found' };
+    throw new Error('unexpected fixture RPC');
+  };
+  const result = await computeCohorts({ ledger, rpc });
+  assert.deepEqual(result.rows, []);
+  assert.equal(result.totals.paid_raw, '0');
+});
+
+test('a returned payment does not turn a grant recipient into a repeat buyer', async () => {
+  const grant = blk({ subtype: 'send', account: A, hash: 'GRANT', at: T0 });
+  const refundSend = blk({ subtype: 'send', account: US, hash: 'BACK', at: T0 + 20, height: 2 });
+  const refundReceive = blk({ subtype: 'receive', account: A, hash: 'REFUND-RECEIVE', link: 'BACK', at: T0 + 21 });
+  const opened = blk({ subtype: 'receive', account: US, hash: 'OPEN', link: 'GRANT', previous: ZERO, at: T0 + 1 });
+  const ledger = [
+    { id: 1, kind: 'payment_out', counterparty: A, amount_raw: grant.amount, block_hash: 'GRANT' },
+    { id: 2, kind: 'payment_in', counterparty: A, amount_raw: refundReceive.amount, block_hash: 'REFUND-RECEIVE', reason: 'Refund of change' }
+  ];
+  const rpc = async body => {
+    if (body.action === 'account_history' && body.account === US) return { history: [grant, refundReceive] };
+    if (body.action === 'account_info') return { open_block: 'OPEN' };
+    if (body.action === 'account_history' && body.account === A) return { history: [opened, refundSend] };
+    throw new Error('unexpected fixture RPC');
+  };
+  const result = await computeCohorts({ ledger, rpc });
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].paid_count, 1);
+  assert.equal(result.rows[0].received_count, 0);
+  assert.equal(result.rows[0].funding.paid_us, false);
+  assert.equal(result.rows[0].interactions.repeat, false);
+  assert.equal(result.totals.received_raw, '0');
+});
+
 test('opened by our payment: receive of our send is the open block', () => {
   const ourSend = blk({ subtype: 'send', account: A, hash: 'S1', at: T0, height: 3 });
   const theirOpen = blk({ subtype: 'receive', account: US, hash: 'R1', link: 'S1', previous: ZERO, at: T0 + 5, height: 1 });
