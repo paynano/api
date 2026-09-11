@@ -31,11 +31,26 @@ const X402_LOG = path.join(__dirname, 'data', 'x402.json');   // settled x402 bl
 // e.g. a keyed hosted GPU work server), then the local node. Clients may omit block.work on
 // the x402 path (extra.work = 'optional'); we compute it here before broadcasting.
 const WORK_URLS = (process.env.WORK_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
-// PAID_WORK_URLS: sources reserved for paid requests (x402 settles and paid /v1/work), tried before
-// WORK_URLS. Currently a GPU reached over a private tunnel; it is not a free public service, so the
-// free tier never touches it. Paying Ӿ0.001 is what buys sub-second work here.
+// PAID_WORK_URLS: a GPU reached over a private tunnel, tried first. Paid requests (x402 settles
+// and paid /v1/work) always get it. Free requests get it too, within a shared budget of
+// FREE_GPU_PER_MIN proofs a minute across all callers (default 30), so a first payment through
+// here takes about a second instead of the 15 to 60 s the CPU path costs. Callers whose account
+// has paid this server before (x402 settle, X-Nano-Payment credit, or a settle through the
+// facilitator) skip the shared budget: they have already shown they are a payer, not a flood.
+// Over budget, free work falls back to WORK_URLS then the node and the reply says which source.
 const PAID_WORK_URLS = (process.env.PAID_WORK_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
 const workName = u => { const h = new URL(u).host; return /^(127\.|localhost)/.test(h) ? 'gpu' : h; };
+const FREE_GPU_PER_MIN = Number(process.env.FREE_GPU_PER_MIN || 30);
+const workSources = () => ({ paid: [...PAID_WORK_URLS.map(workName), ...WORK_URLS.map(workName), 'node'],
+  free: [...PAID_WORK_URLS.map(u => workName(u) + ' (' + FREE_GPU_PER_MIN + '/min shared; unlimited for accounts that paid before)'), ...WORK_URLS.map(workName), 'node'] });
+const freeGpu = { tokens: FREE_GPU_PER_MIN, at: Date.now() };
+function takeFreeGpu() {   // token bucket: FREE_GPU_PER_MIN a minute, burst the same
+  const now = Date.now();
+  freeGpu.tokens = Math.min(FREE_GPU_PER_MIN, freeGpu.tokens + (now - freeGpu.at) / 60_000 * FREE_GPU_PER_MIN); freeGpu.at = now;
+  if (freeGpu.tokens < 1) return false;
+  freeGpu.tokens -= 1; return true;
+}
+let gpuDownUntil = 0;   // circuit breaker: after a network failure the GPU is skipped for 60 s (the home machine may be off)
 const X402_REQ = x402.requirements({ payTo: ADDRESS, amountRaw: PRICE_RAW, maxTimeoutSeconds: 60, workOptional: true });
 const x402Reference = new X402Reference(new Helper({ NANO_RPC_URL: RPC })); // reference verify() runs in addition to ours
 const settling = new Set();                                    // block hashes with a "process" call in flight
@@ -55,9 +70,13 @@ async function rpc(body) {
 
 // work_generate for `hash` at the send threshold via the first source that answers.
 // Returns { work, source, ms } or throws with the last error.
-const workStats = { generated: 0, by_source: {}, last_error: '' };
-async function workFor(hash, { timeoutMs = 30_000, paid = false } = {}) {
-  const sources = [...(paid ? PAID_WORK_URLS : []).map(u => ({ name: workName(u), url: u, timeoutMs: 15_000 })),
+const workStats = { generated: 0, by_source: {}, by_tier: {}, last_error: '' };
+// tier: 'paid' (GPU, no limit), 'payer' (free call from an account that has paid before: GPU, no
+// shared budget), 'free' (GPU while the shared budget lasts), 'free-slow' (budget spent: hosted key, then node).
+async function workFor(hash, { timeoutMs = 30_000, paid = false, knownPayer = false } = {}) {
+  let tier = paid ? 'paid' : knownPayer ? 'payer' : takeFreeGpu() ? 'free' : 'free-slow';
+  const gpuOk = tier !== 'free-slow' && Date.now() >= gpuDownUntil;
+  const sources = [...(gpuOk ? PAID_WORK_URLS : []).map(u => ({ name: workName(u), url: u, timeoutMs: paid ? 15_000 : 10_000, gpu: true })),
                    ...WORK_URLS.map(u => ({ name: workName(u), url: u, timeoutMs })), { name: 'node', url: RPC, timeoutMs: 180_000 }];
   let lastErr = 'no work source';
   for (const src of sources) {
@@ -69,13 +88,38 @@ async function workFor(hash, { timeoutMs = 30_000, paid = false } = {}) {
       const j = await r.json();
       if (j && j.work) {
         workStats.generated++; workStats.by_source[src.name] = (workStats.by_source[src.name] || 0) + 1;
-        return { work: String(j.work).toLowerCase(), source: src.name, ms: Date.now() - t0 };
+        workStats.by_tier[tier] = (workStats.by_tier[tier] || 0) + 1;
+        return { work: String(j.work).toLowerCase(), source: src.name, ms: Date.now() - t0, tier };
       }
       lastErr = src.name + ': ' + (j && (j.error || j.message) || 'no work in response');
-    } catch (e) { lastErr = src.name + ': ' + e.message; }
+    } catch (e) {
+      lastErr = src.name + ': ' + e.message;
+      if (src.gpu) { gpuDownUntil = Date.now() + 60_000; workStats.gpu_down_until = new Date(gpuDownUntil).toISOString(); }
+    }
     workStats.last_error = lastErr;
   }
   throw new Error(lastErr);
+}
+
+// Accounts that have paid this server before, by any route. Free work for their frontier goes
+// to the GPU without touching the shared budget. Work over a frontier is only usable by that
+// account's owner, so requesting it for someone else's frontier gains an attacker nothing.
+const PAYERS = path.join(__dirname, 'data', 'payers.json');
+const knownPayers = new Set();
+try { for (const a of JSON.parse(fs.readFileSync(PAYERS, 'utf8'))) knownPayers.add(a); } catch {}
+for (const e of x402Log) if (e.payer) knownPayers.add(e.payer);
+try { for (const e of (JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'facilitator.json'), 'utf8')).settled || [])) if (e.payer) knownPayers.add(e.payer); } catch {}
+function rememberPayer(account) {
+  if (!account || knownPayers.has(account)) return;
+  knownPayers.add(account);
+  try { fs.writeFileSync(PAYERS, JSON.stringify([...knownPayers])); } catch {}
+}
+// Is `hash` the frontier of an account that has paid before? One local block_info; false for
+// anything that is not a block on this node (e.g. a public key for an open block).
+async function isKnownPayerFrontier(hash) {
+  if (knownPayers.size === 0) return false;
+  try { const b = await rpc({ action: 'block_info', json_block: 'true', hash }); return !!(b && b.block_account && knownPayers.has(b.block_account)); }
+  catch { return false; }
 }
 
 // Look up a send block hash and turn it into credit (once).
@@ -93,6 +137,7 @@ async function creditFor(hash) {
   if (amount > MAX_CREDIT_RAW) return { error: 'send too large to be a payment; max 1 NANO per hash' };
   credits[hash] = amount.toString();
   save();
+  rememberPayer(b.block_account);
   return { remaining: amount };
 }
 
@@ -160,6 +205,7 @@ async function chargeX402(req, res, headerValue) {
   if (v.hash !== s.transaction) credits[v.hash] = '0';
   save();
   x402Log.push({ hash: s.transaction, payer: v.payer, amount_raw: PRICE_RAW.toString(), resource: req.url, at: new Date().toISOString(), work_by: v.workBy || 'client' });
+  rememberPayer(v.payer);
   try { fs.writeFileSync(X402_LOG, JSON.stringify(x402Log)); } catch {}
   stats.calls_paid++; stats.calls_x402++;
   res.setHeader(x402.RESPONSE_HEADER, x402.settleHeader(s));
@@ -170,9 +216,11 @@ async function chargeX402(req, res, headerValue) {
 // Rate-limited proxy to the node's work_generate, for clients without a work server.
 const workHits = new Map();   // ip -> [timestamps]
 let workInFlight = 0;
-// Free: 3 per minute per IP. Paid (X-Nano-Payment credit hash or an x402 PAYMENT-SIGNATURE
-// at the standard price): no per-IP limit. A paying x402 block gets its own work computed
-// here too, so an agent with Nano but no PoW can buy its first work without doing any.
+// Free: FREE_WORK_PER_MIN per minute per IP (default 6), GPU while the shared budget lasts.
+// Paid (X-Nano-Payment credit hash or an x402 PAYMENT-SIGNATURE at the standard price): no
+// per-IP limit, GPU always. A paying x402 block gets its own work computed here too, so an
+// agent with Nano but no PoW can buy its first work without doing any.
+const FREE_WORK_PER_MIN = Number(process.env.FREE_WORK_PER_MIN || 6);
 async function workGenerate(req, res) {
   const paid = !!(req.headers['x-nano-payment'] || x402.paymentHeader(req.headers));
   if (paid) {
@@ -183,7 +231,7 @@ async function workGenerate(req, res) {
     const now = Date.now();
     const hits = (workHits.get(ip) || []).filter(t => now - t < 60_000);
     // Over the free limit the answer is a normal 402 with PAYMENT-REQUIRED, so an x402 client just pays.
-    if (hits.length >= 3) return paymentRequired(res, 'free limit is 3 work_generate calls per minute per IP; pay ' + nano(PRICE_RAW) + ' NANO per work (X-Nano-Payment credit or x402 PAYMENT-SIGNATURE) to continue without limit', req);
+    if (hits.length >= FREE_WORK_PER_MIN) return paymentRequired(res, 'free limit is ' + FREE_WORK_PER_MIN + ' work_generate calls per minute per IP; pay ' + nano(PRICE_RAW) + ' NANO per work (X-Nano-Payment credit or x402 PAYMENT-SIGNATURE) to continue without limit', req);
     hits.push(now); workHits.set(ip, hits);
     if (workHits.size > 10_000) workHits.clear();
   }
@@ -191,11 +239,12 @@ async function workGenerate(req, res) {
   try { body = JSON.parse((await readBody(req, 10_000)).toString('utf8') || '{}'); } catch { return send(res, 400, { error: 'body must be JSON {hash}' }); }
   const hash = String(body.hash || '').toUpperCase();
   if (!/^[0-9A-F]{64}$/.test(hash)) return send(res, 400, { error: 'hash must be 64 hex characters (your account frontier)' });
-  if (workInFlight >= 2) return send(res, 503, { error: 'work server busy; retry in a few seconds' });
+  if (workInFlight >= 4) return send(res, 503, { error: 'work server busy; retry in a few seconds' });
   workInFlight++;
   try {
-    const r = await workFor(hash, { paid });
-    return send(res, 200, { hash, work: r.work, threshold: x402.WORK_THRESHOLD, source: r.source, ms: r.ms, paid });
+    const knownPayer = !paid && await isKnownPayerFrontier(hash);
+    const r = await workFor(hash, { paid, knownPayer });
+    return send(res, 200, { hash, work: r.work, threshold: x402.WORK_THRESHOLD, source: r.source, ms: r.ms, paid, tier: r.tier });
   } catch (e) { return send(res, 502, { error: 'work_generate: ' + e.message }); }
   finally { workInFlight--; }
 }
@@ -409,10 +458,13 @@ Endpoints
                               broadcast a signed state block through this node (free, 60/min).
                               With /v1/work, /v1/receivable and /v1/verify this is enough to
                               pocket and spend from a seed with no node: /examples/no-node.md
-  POST /v1/work  {"hash":H}   work_generate at the send threshold for any hash: 3 per minute
-                              per IP free (CPU, seconds); with X-Nano-Payment credit or an x402
-                              payment header, ${nano(PRICE_RAW)} NANO per work, GPU, about a
-                              second, no limit
+  POST /v1/work  {"hash":H}   work_generate at the send threshold for any hash. Free: 6 per
+                              minute per IP, from a GPU (about a second) while a shared budget
+                              of 30 free proofs a minute lasts, then CPU sources (10 s or more);
+                              the reply's "source" and "ms" say which. Accounts that have paid
+                              this server before always get the GPU. With X-Nano-Payment credit
+                              or an x402 payment header, ${nano(PRICE_RAW)} NANO per work, GPU,
+                              no limit
 
 Example
   curl -s 'https://pursekeeper.dev/v1/fetch?url=https://example.com' \\
@@ -452,15 +504,15 @@ const server = http.createServer(async (req, res) => {
     }
     if (u.pathname === '/v1/price') return send(res, 200, { pay_to: ADDRESS, price_raw: PRICE_RAW.toString(), price_nano: nano(PRICE_RAW) });
     if (u.pathname === '/v1/stats') return send(res, 200, { ...stats, checks: checkStats(), credited_hashes: Object.keys(credits).length, x402_settled: x402Log.length,
-      x402_work_by_seller: x402Log.filter(e => e.work_by === 'seller').length, work: workStats, work_sources: { paid: [...PAID_WORK_URLS.map(workName), ...WORK_URLS.map(workName), 'node'], free: [...WORK_URLS.map(workName), 'node'] } });
+      x402_work_by_seller: x402Log.filter(e => e.work_by === 'seller').length, work: { ...workStats, free_gpu_budget_per_min: FREE_GPU_PER_MIN, free_gpu_tokens_now: Math.floor(freeGpu.tokens), known_payers: knownPayers.size }, work_sources: workSources() });
     if (u.pathname === '/v1/x402') return send(res, 200, {
       x402Version: x402.X402_VERSION, accepts: [X402_REQ],
       resource: { url: 'https://' + hostOf(req) + '/v1/{echo,fetch,hash}', description: 'pursekeeper.dev pay-per-call API', mimeType: 'application/json' },
       request_header: 'PAYMENT-SIGNATURE (X-PAYMENT also accepted): base64 JSON {x402Version:2, accepted, payload:{block}}',
       response_header: 'PAYMENT-RESPONSE: base64 JSON {success, transaction, network, payer}',
       block_rules: 'state block from your current confirmed frontier; balance = current balance - amount exactly; link = payTo; work optional (extra.work = "optional"): omit it or send "0" and this seller computes it before broadcasting; if you send work it must be valid at ' + x402.WORK_THRESHOLD + ' against previous',
-      work: 'POST /v1/work {"hash": "<frontier>"}: 3 per minute per IP free, or pay ' + nano(PRICE_RAW) + ' NANO per work (same headers) with no limit; for sends to anyone else', example: '/examples/client-x402.js', spec: 'https://github.com/x402nano/schemes',
-      work_sources: { paid: [...PAID_WORK_URLS.map(workName), ...WORK_URLS.map(workName), 'node'], free: [...WORK_URLS.map(workName), 'node'] } });
+      work: 'POST /v1/work {"hash": "<frontier>"}: 6 per minute per IP free (GPU, about a second, within a shared budget of ' + FREE_GPU_PER_MIN + ' a minute; CPU after that), or pay ' + nano(PRICE_RAW) + ' NANO per work (same headers) with no limit; for sends to anyone else', example: '/examples/client-x402.js', spec: 'https://github.com/x402nano/schemes',
+      work_sources: workSources() });
     if (u.pathname === '/v1/work' && req.method === 'POST') return workGenerate(req, res);
     if (u.pathname === '/v1/verify') return verifyBlock(req, res, u);
     if (u.pathname === '/v1/receivable') return receivable(req, res, u);

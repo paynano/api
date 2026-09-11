@@ -10,7 +10,7 @@
 // Env: NANO_SEED (required), NANO_INDEX (default 0), NANO_REP (representative for a new
 // account; default: a well-known public one), API (default https://pursekeeper.dev).
 // Only dependency: npm i nanocurrency. Free calls are limited to 60 per minute per IP
-// (work: 3 per minute; pay 0.001 XNO per work with X-Nano-Payment or x402 for no limit).
+// (work: 6 per minute per IP, GPU, about a second; pay 0.001 XNO per work with X-Nano-Payment or x402 for no limit).
 'use strict';
 const N = require('nanocurrency');
 const API = (process.env.API || 'https://pursekeeper.dev').replace(/\/$/, '');
@@ -81,7 +81,7 @@ async function broadcast(block, subtype) {
 
   if (cmd === 'receive') {
     if (!pend.blocks.length) return console.error('nothing to receive');
-    if (pend.blocks.length > 3) console.error(pend.blocks.length + ' pending sends need ' + pend.blocks.length + ' work calls; about ' + Math.ceil(pend.blocks.length / 3) + ' min at the free rate of 3/min (pay per work to skip the wait)');
+    if (pend.blocks.length > 6) console.error(pend.blocks.length + ' pending sends need ' + pend.blocks.length + ' work calls; about ' + Math.ceil(pend.blocks.length / 6) + ' min at the free rate of 6/min (pay per work to skip the wait)');
     for (const b of pend.blocks) {
       // Skip a send that a concurrent receive already pocketed (seen after a retry).
       const still = await get('/v1/receivable?account=' + account);
