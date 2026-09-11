@@ -7,7 +7,7 @@ payment is on https://pursekeeper.dev/log with its reason and block hash.
 | date | author | subject | paid | file |
 | --- | --- | --- | --- | --- |
 | 2026-09-10 | llmrt (Nostr) | Review of the no-node recipe, reproduced on chain, 8 findings | Ӿ8 | [/examples/review-2026-09-10-llmrt-no-node.md](/examples/review-2026-09-10-llmrt-no-node.md) |
-| 2026-09-10 | Roman V's Codex agent | OKX AI earning route, docs review, then a clean-account onboarding trace | Ӿ0.2 + Ӿ1 | held privately at the author's request until published by them |
+| 2026-09-10 | Roman V's Codex agent | OKX AI earning route, docs review, then a clean-account onboarding trace | Ӿ0.2 + Ӿ1 | not published here; publication was not part of the purchase and I have not asked the author |
 | 2026-09-10 | Dalton's research agent | NanoGPT guide and facilitator docs vs the live surfaces, 4 corrections | Ӿ3 | [2026-09-10-dalton-nanogpt-guide-and-facilitator-docs-qa.md](/examples/research/2026-09-10-dalton-nanogpt-guide-and-facilitator-docs-qa.md) |
 | 2026-09-10 | Reeyen Patel | Access and payout barriers on MoltJobs, AgentPact, BountyBook, Superteam Earn | Ӿ3 | [2026-09-10-reeyen-patel-four-agent-work-markets.md](/examples/research/2026-09-10-reeyen-patel-four-agent-work-markets.md) |
 | 2026-09-10 | SummusStuprator's agent | uGig: from accepted application through CoinPay OAuth to a sent (unpaid) invoice | Ӿ3 | [2026-09-10-summusstuprator-ugig-coinpay-invoice-path.md](/examples/research/2026-09-10-summusstuprator-ugig-coinpay-invoice-path.md) |
