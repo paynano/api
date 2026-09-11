@@ -69,7 +69,7 @@ async function ownAddresses(ledger, rpc) {
 }
 
 // What the chain says about one counterparty, given our own history.
-async function chainFor(rpc, address, ours) {
+async function chainFor(rpc, address, ours, refunds) {
   const ourSends = ours.filter(b => b.subtype === 'send' && b.account === address);
   const ourReceives = ours.filter(b => b.subtype === 'receive' && b.account === address);
   const info = await rpc({ action: 'account_info', account: address, include_confirmed: 'true' });
@@ -81,11 +81,12 @@ async function chainFor(rpc, address, ours) {
     // sends and their sends to us. `count` limits matches, not blocks scanned.
     const h = await rpc({ action: 'account_history', account: address, count: String(SCAN), raw: 'true', reverse: 'true', account_filter: [ADDRESS] });
     if (h.error) throw new Error('account_history: ' + h.error);
-    withUs = h.history || [];
+    withUs = (h.history || []).filter(b => !refundedBlock(b, refunds));
     const firstIn = withUs.find(b => b.subtype === 'receive');
     if (firstIn) {
       // Their chain from that receive forward, to find the first outbound send.
       const h2 = await rpc({ action: 'account_history', account: address, count: String(SCAN), raw: 'true', reverse: 'true', head: firstIn.hash });
+      if (h2.error) throw new Error('outbound account_history: ' + h2.error);
       after = h2.history || [];
     }
     // The open block is only needed when the receive of our send is not it.
@@ -132,6 +133,12 @@ function isRefund(r) {
   return !!meta.refund || /^refund\b/i.test(r.reason || '') || /\[refund\]/i.test(r.reason || '');
 }
 
+const hashKey = value => String(value || '').toUpperCase();
+function refundedBlock(block, refunds) {
+  return refunds.has(hashKey(block.hash)) ||
+    (block.subtype === 'receive' && refunds.has(hashKey(block.link)));
+}
+
 // Counterparties from the ledger: every payment_out destination and payment_in source
 // that is a Nano address and not one of ours.
 function collect(ledger, own) {
@@ -165,9 +172,9 @@ function addChainOnly(cps, ours, own) {
 
 const sum = rows => rows.reduce((a, b) => a + BigInt(b.amount || b.amount_raw || 0), 0n);
 
-function classify(cp, chain) {
+function classify(cp, chain, refunds = loadRefundHashes()) {
   const { ourSends, exists, withUs, after, open } = chain;
-  const theirSends = withUs.filter(b => b.subtype === 'send' && !loadRefundHashes().has(String(b.hash || '').toUpperCase()));
+  const theirSends = withUs.filter(b => b.subtype === 'send' && !refundedBlock(b, refunds));
   const firstIn = withUs.find(b => b.subtype === 'receive');
   const paidByUs = ourSends.length > 0 || cp.ledger_out.length > 0;
   const paidUs = theirSends.length > 0 || cp.ledger_in.length > 0;
@@ -240,12 +247,25 @@ function totalsOf(rows) {
 // --- main --------------------------------------------------------------------
 
 async function computeCohorts({ ledger = readLedger(), rpc = cachedRpc } = {}) {
-  const ours = await ourHistory(rpc);
+  const history = await ourHistory(rpc);
+  const refunds = new Set(loadRefundHashes());
+  for (const row of ledger) {
+    if (row.block_hash && isRefund(row)) refunds.add(hashKey(row.block_hash));
+  }
+  // A refund may be recorded by our receive hash, while the counterparty's
+  // history identifies the corresponding send hash. Exclude both sides.
+  for (const block of history) {
+    if (block.subtype === 'receive' && refundedBlock(block, refunds)) {
+      if (block.hash) refunds.add(hashKey(block.hash));
+      if (block.link) refunds.add(hashKey(block.link));
+    }
+  }
+  const ours = history.filter(b => !refundedBlock(b, refunds));
   const own = await ownAddresses(ledger, rpc);
   const cps = addChainOnly(collect(ledger, own), ours, own);
   const rows = [];
   for (const cp of cps.values()) {
-    try { rows.push(classify(cp, await chainFor(rpc, cp.address, ours))); }
+    try { rows.push(classify(cp, await chainFor(rpc, cp.address, ours, refunds), refunds)); }
     catch (e) {
       rows.push({ address: cp.address, wallet_state: 'unknown', funding: { grant_funded: cp.ledger_out.length > 0, independently_earned: cp.ledger_in.length > 0 && !cp.ledger_out.length, paid_us: cp.ledger_in.length > 0 },
         first_receipt: null, first_spend: null, first_spend_status: 'unknown', interactions: { count: 0, within_30d: 0, repeat: false, first_at: null, last_at: null },
