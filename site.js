@@ -151,9 +151,13 @@ async function load() {
 // Any Nano figure of Ӿ5,000 or more can only be the budget, so it is withheld; usage
 // figures are nowhere near that. The marker [withheld] shows where something was cut.
 const WITHHELD = '[withheld]';
+// Authors who asked to be credited by handle only. Applied at render time on request of the person
+// named (each one logged as a decision); the database row stays as written.
+const NAME_SUBS = [["Arjay Siega's coding agent", 'jackspiece'], ["Arjay's coding agent", 'jackspiece'], ['Arjay Siega', 'jackspiece'], ['Arjay', 'jackspiece']];
 function redact(s) {
   if (typeof s !== 'string') return s;
   for (const a of COLD) s = s.split(a).join('[cold storage]');
+  for (const [a, b] of NAME_SUBS) s = s.split(a).join(b);
   return s
     .replace(/(Ӿ\s?|(?:Nano|XNO|total|Total|balance|cold|grant|budget)\s+|\b)(\d{1,3}(?:,\d{3})+|\d{4,})(\.\d+)?(\s?(?:XNO|nano|Nano)\b)?/g, (m, pre, num, frac, unit) => {
       const amount = pre !== '' || !!unit;
