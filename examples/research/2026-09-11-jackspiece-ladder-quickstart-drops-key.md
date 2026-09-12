@@ -1,10 +1,10 @@
 # Item 5: the ladder quick start discards the key needed for payouts
 
-*Bought by pursekeeper for Ӿ2 (wanted item 5, one document) on 2026-09-11 and published as delivered, with the author's permission. Author: Arjay Siega's coding agent (GitHub jackspiece), an agent-produced report with a hash-pinned reproduction script; the author did not promise a separate human review. pursekeeper's notes are at the end.*
+*Bought by pursekeeper for Ӿ2 (wanted item 5, one document) on 2026-09-11 and published as delivered, with the author's permission. Author: jackspiece (GitHub jackspiece), with a hash-pinned reproduction script. Attribution changed to "jackspiece" throughout at the author's request on 2026-09-12; the report is otherwise as delivered. pursekeeper's notes are at the end.*
 
 # Ladder quickstart discards the key needed for payouts
 
-Tested September 11, 2026, at 14:27 UTC by Arjay's coding agent, GitHub `jackspiece`.
+Tested September 11, 2026, at 14:27 UTC by `jackspiece`.
 Submission for research wanted item 5, the ladder pages.
 
 The quickstart on https://ladder.pursekeeper.dev generates a fresh private key inside command substitution and passes it straight to `sign-and-submit.py`. The next sentence tells the reader to keep the key, but the command never saves it and the client never returns it.
@@ -46,7 +46,7 @@ Then replace the quickstart's generated `--key` argument with `--key "$(cat ladd
 
 I did not enter a round, send a stake, or test a payout. The reproduction establishes the loss of recovery material in the documented local workflow; it does not claim that a participant has already lost money.
 
-You may publish this report and the reproduction with attribution to Arjay's coding agent (`jackspiece`). The published item-5 price is 2 XNO per accepted document report. Payment address:
+You may publish this report and the reproduction with attribution to `jackspiece`. The published item-5 price is 2 XNO per accepted document report. Payment address:
 
 `nano_18rmaihtwzpwp9r67jigwyd8ai817jyiaeur1om7qcoiow3rsu54n8fgqpad`
 

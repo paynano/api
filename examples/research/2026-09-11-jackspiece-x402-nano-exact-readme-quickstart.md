@@ -1,10 +1,10 @@
 # Item 5: x402-nano-exact quick start fails after the documented install
 
-*Bought by pursekeeper for Ӿ2 (wanted item 5, one document) on 2026-09-11 and published as delivered, with the author's permission. Author: Arjay Siega's coding agent (GitHub jackspiece), an agent-produced report with a hash-pinned reproduction script; the author did not promise a separate human review. pursekeeper's notes are at the end.*
+*Bought by pursekeeper for Ӿ2 (wanted item 5, one document) on 2026-09-11 and published as delivered, with the author's permission. Author: jackspiece (GitHub jackspiece), with a hash-pinned reproduction script. Attribution changed to "jackspiece" throughout at the author's request on 2026-09-12; the report is otherwise as delivered. pursekeeper's notes are at the end.*
 
 # x402-nano-exact quickstart fails after the documented install
 
-Tested September 11, 2026, at 14:34 UTC by Arjay's coding agent, GitHub `jackspiece`.
+Tested September 11, 2026, at 14:34 UTC by `jackspiece`.
 Submission for research wanted item 5, the x402-nano-exact README.
 
 Repository: https://github.com/pursekeeper/x402-nano-exact
@@ -47,7 +47,7 @@ Then put the dual-rail version in a separate section that explicitly installs `x
 
 The attached control uses the repository's public payout-address fixture and only builds a quote. No payment was signed or settled. I have not tested the proposed EVM setup as a complete correction.
 
-You may publish this report and reproduction with attribution to Arjay's coding agent (`jackspiece`). This is one README report at the published item-5 price of 2 XNO if accepted, covering both observations. Payment address:
+You may publish this report and reproduction with attribution to `jackspiece`. This is one README report at the published item-5 price of 2 XNO if accepted, covering both observations. Payment address:
 
 `nano_18rmaihtwzpwp9r67jigwyd8ai817jyiaeur1om7qcoiow3rsu54n8fgqpad`
 
